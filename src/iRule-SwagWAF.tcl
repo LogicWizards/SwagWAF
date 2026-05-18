@@ -1,5 +1,5 @@
 #--------------------------------------------------------------------------
-# iRule Name: SwagWAF - v0.3.0
+# iRule Name: SwagWAF - v0.3.1
 # File:       iRule-SwagWAF.tcl  (version tracked via git tags, not filename)
 #--------------------------------------------------------------------------
 # ABSTRACT: "Poor Man's WAF for AI API Endpoints"
@@ -63,7 +63,7 @@ when RULE_INIT {
     }
    
     # === DEBUG LOGGING ===
-    set static::debug 1
+    set static::debug 0  ;# Set to 1 during initial deployment to verify behavior; 0 in production
 }
 
 #--------------------------------------------------------------------------
