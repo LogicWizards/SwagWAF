@@ -2,19 +2,33 @@
 # --------------------------------------------------------------------------
 # SCRIPT: update-dg.py
 # --------------------------------------------------------------------------
-# ABSTRACT: Create or replace the dg_injection_phrase data group on a BIG-IP
-#     via the iControl REST API. Parses dg_injection_phrase.conf (the single
-#     source of truth) and pushes it as a complete replacement (PUT) or
-#     initial create (POST).
+# ABSTRACT: Create or replace a SwagWAF data group on a BIG-IP via the iControl
+#     REST API. Parses a .conf file (single source of truth) and pushes it as a
+#     complete replacement (PUT) or initial create (POST). DG name and partition
+#     are read from the conf file header — no hardcoding required.
 #
 # USAGE:
-#     python3 update-dg.py <bigip-host> <username>
+#     python3 update-dg.py <bigip-host> <username> [conf-file]
+#
+#     conf-file  Path to the ltm data-group conf file.
+#                Defaults to dg_swagwaf_jailbreak_patterns.conf (sibling of this script).
+#                Any dg_swagwaf_*.conf with a valid header works without code changes.
 #
 #     Password is prompted interactively — never passed as an argument.
-#     Run from any directory; the conf file is located relative to this script.
+#     Run from any directory; relative conf paths resolve from cwd.
 #
 # REQUIREMENTS: Python 3.6+ stdlib only (no pip installs needed).
 #               BIG-IP v15+ ships Python 3.6; v14 ships Python 2 — use v15+.
+#
+# WARNING: This script is intended for lab use and careful manual operation.
+#     - TLS certificate verification is DISABLED (ssl.CERT_NONE). This is
+#       acceptable for BIG-IP management interfaces using self-signed certs,
+#       but means the connection is vulnerable to MITM on untrusted networks.
+#       Only run this from a trusted management VLAN or jump host.
+#     - There is no dry-run mode. A successful PUT/POST overwrites the live
+#       data group immediately — no backup is taken beforehand.
+#     - Not hardened for unattended CI/CD use. Review and add retry logic,
+#       cert pinning, and pre-update backup before automating.
 # --------------------------------------------------------------------------
 
 import sys
@@ -27,9 +41,19 @@ import ssl
 from base64 import b64encode
 from pathlib import Path
 
-DG_NAME   = "dg_injection_phrase"
-PARTITION = "Common"
-CONF_FILE = Path(__file__).parent / "dg_injection_phrase.conf"
+DEFAULT_CONF = Path(__file__).parent / "dg_swagwaf_jailbreak_patterns.conf"
+
+
+def parse_dg_meta(path):
+    """
+    Extract partition and DG name from the conf header line:
+      ltm data-group internal /Common/dg_name {
+    Returns: (partition, dg_name)
+    """
+    m = re.search(r'ltm data-group internal /([\w-]+)/([\S]+)\s*\{', path.read_text())
+    if not m:
+        raise ValueError(f"Cannot determine DG name/partition from {path}")
+    return m.group(1), m.group(2)
 
 
 def parse_conf(path):
@@ -67,26 +91,33 @@ def rest(bigip, auth_header, method, path, body=None):
 
 
 def main():
-    if len(sys.argv) != 3:
-        print(f"Usage: python3 {Path(sys.argv[0]).name} <bigip-host> <username>",
+    if len(sys.argv) not in (3, 4):
+        print(f"Usage: python3 {Path(sys.argv[0]).name} <bigip-host> <username> [conf-file]",
               file=sys.stderr)
         sys.exit(1)
 
     bigip, username = sys.argv[1], sys.argv[2]
+    conf_file = Path(sys.argv[3]) if len(sys.argv) == 4 else DEFAULT_CONF
+
+    if not conf_file.exists():
+        print(f"ERROR: conf file not found: {conf_file}", file=sys.stderr)
+        sys.exit(1)
+
+    partition, dg_name = parse_dg_meta(conf_file)
     password = getpass.getpass(f"BIG-IP password for {username}@{bigip}: ")
     auth     = "Basic " + b64encode(f"{username}:{password}".encode()).decode()
 
-    records = parse_conf(CONF_FILE)
-    print(f"Parsed {len(records)} records from {CONF_FILE.name}")
+    records = parse_conf(conf_file)
+    print(f"Parsed {len(records)} records from {conf_file.name} ({dg_name})")
 
     payload = {
-        "name":      DG_NAME,
-        "partition": PARTITION,
+        "name":      dg_name,
+        "partition": partition,
         "type":      "string",
         "records":   records,
     }
 
-    dg_path = f"/mgmt/tm/ltm/data-group/internal/~{PARTITION}~{DG_NAME}"
+    dg_path = f"/mgmt/tm/ltm/data-group/internal/~{partition}~{dg_name}"
 
     status, body = rest(bigip, auth, "PUT", dg_path, payload)
     if status == 404:
@@ -95,7 +126,7 @@ def main():
                             "/mgmt/tm/ltm/data-group/internal", payload)
 
     if 200 <= status < 300:
-        print(f"OK (HTTP {status}): {DG_NAME} updated on {bigip} "
+        print(f"OK (HTTP {status}): {dg_name} updated on {bigip} "
               f"({len(records)} records)")
     else:
         print(f"ERROR (HTTP {status}):", file=sys.stderr)

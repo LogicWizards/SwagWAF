@@ -11,7 +11,7 @@
 #--------------------------------------------------------------------------
 # FEATURES:
 # - Bot detection via rate limiting (sliding window, violation tracking)
-# - Prompt injection detection via dg_injection_phrase data group (threat-level aware)
+# - Prompt injection detection via dg_swagwaf_jailbreak_patterns data group (threat-level aware)
 #     HIGH   -> 403 block + violation points (3)
 #     MEDIUM -> 400 reject + violation point (1)
 #     LOW    -> log only, allow through
@@ -32,8 +32,8 @@ when RULE_INIT {
     set static::block_seconds 600    ;# 10 min block duration
    
     # === AI-SPECIFIC PROTECTION ===
-    # Primary injection detection uses the dg_injection_phrase data group (threat-level aware).
-    # See examples/data-groups/dg_injection_phrase.conf — that file is the ONLY place to
+    # Primary injection detection uses the dg_swagwaf_jailbreak_patterns data group (threat-level aware).
+    # See examples/data-groups/dg_swagwaf_jailbreak_patterns.conf — that file is the ONLY place to
     # add/remove/re-tier phrases. Do NOT duplicate the full list here.
     #
     # The static list below is a minimal last-resort fallback for environments where the
@@ -48,6 +48,18 @@ when RULE_INIT {
         "<script>"
         "'; DROP TABLE"
         "UNION SELECT"
+    }
+
+    # === DATA GROUP AVAILABILITY — checked ONCE at rule load ===
+    # Avoids per-request catch overhead. If dg_swagwaf_jailbreak_patterns is deployed
+    # after this iRule loads, re-trigger RULE_INIT by saving the iRule:
+    #   tmsh modify ltm rule SwagWAF { }
+    if {[catch {class match -element -- "" matches_regex dg_swagwaf_jailbreak_patterns}]} {
+        set static::dg_jailbreak_ready 0
+        log local0. "SwagWAF WARNING: dg_swagwaf_jailbreak_patterns not configured — static fallback active"
+    } else {
+        set static::dg_jailbreak_ready 1
+        log local0. "SwagWAF: dg_swagwaf_jailbreak_patterns loaded OK"
     }
    
     # === DEBUG LOGGING ===
@@ -136,19 +148,18 @@ when HTTP_REQUEST_DATA {
     set ip [IP::client_addr]
 
     # === PRIMARY: Data Group-Based Injection Detection ===
-    # dg_injection_phrase is an internal string data group: regex_pattern := HIGH|MEDIUM|LOW
+    # dg_swagwaf_jailbreak_patterns is an internal string data group: regex_pattern := HIGH|MEDIUM|LOW
     # Keys are PCRE regex patterns matched against the lowercased payload.
     # class match -element returns the pattern that matched; -value returns the threat level.
-    # Falls back gracefully to static patterns if the data group is not configured.
-    if {[catch {
-        set matched_phrase [class match -element -- $payload_lower matches_regex dg_injection_phrase]
-    } err]} {
-        if {$static::debug} { log local0. "<DEBUG>$ip: dg_injection_phrase unavailable, using static fallback: $err" }
+    # Availability confirmed at RULE_INIT — no catch needed here.
+    if {$static::dg_jailbreak_ready} {
+        set matched_phrase [class match -element -- $payload_lower matches_regex dg_swagwaf_jailbreak_patterns]
+    } else {
         set matched_phrase ""
     }
 
     if {$matched_phrase ne ""} {
-        set threat_level [class match -value -- $matched_phrase equals dg_injection_phrase]
+        set threat_level [class match -value -- $matched_phrase equals dg_swagwaf_jailbreak_patterns]
         if {$threat_level eq ""} { set threat_level "HIGH" }
 
         log local0. "INJECTION_ATTEMPT: $ip phrase=\"$matched_phrase\" threat_level=$threat_level"
@@ -176,7 +187,7 @@ when HTTP_REQUEST_DATA {
     }
 
     # === FALLBACK: Static Pattern Check ===
-    # Used when dg_injection_phrase data group is not configured on this BIG-IP.
+    # Used when dg_swagwaf_jailbreak_patterns data group is not configured on this BIG-IP.
     foreach pattern $static::injection_patterns {
         if {[string match -nocase "*$pattern*" $payload_lower]} {
             log local0. "INJECTION_ATTEMPT: $ip pattern=\"$pattern\" (static fallback)"

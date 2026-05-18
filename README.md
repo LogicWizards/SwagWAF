@@ -24,7 +24,9 @@ SwagWAF/
 │   ├── curl/
 │   │   └── test-commands.md
 │   └── data-groups/
-│       └── README.md
+│       ├── README.md
+│       ├── dg_swagwaf_jailbreak_patterns.conf
+│       └── update-dg.py
 └── .github/
     └── workflows/
 ```
@@ -248,20 +250,8 @@ curl --tlsv1.1 https://your-api/
 
 ## Roadmap
 
-If given more time, the next additions would include:
-
 * IP reputation hooks, even if initially stubbed for alerting
-* per-endpoint rate limiting instead of relying only on per-IP thresholds
-* broader AI-aware pattern coverage through dynamic data groups
-* external automation to refresh data groups on a schedule or event trigger
-
-### Example: Dynamic Data-Group Matching
-
-```tcl
-if {[class match $payload_lower contains dg_swagwaf_jailbreak_patterns]} {
-    # reject / increment violations
-}
-```
+* per-endpoint rate limiting via `dg_swagwaf_endpoint_limits` data group
 
 ### Example: Endpoint-Specific Limits
 
@@ -272,6 +262,32 @@ if {[class match $payload_lower contains dg_swagwaf_jailbreak_patterns]} {
 ```
 
 This would allow the iRule to derive rate limits from `HTTP::path` rather than using a single global threshold.
+
+---
+
+## What's New in v0.3.0
+
+### Data Group-Based Threat Detection
+
+Injection detection is now driven by a BIG-IP internal data group (`dg_swagwaf_jailbreak_patterns`) with three threat levels:
+
+| Threat Level | Response | Violation Points |
+|---|---|---|
+| `HIGH` | 403 Forbidden | +3 |
+| `MEDIUM` | 400 Bad Request | +1 |
+| `LOW` | Log only, allow through | 0 |
+
+The iRule falls back to a minimal static pattern list if the data group is not deployed.
+
+```tcl
+set matched_phrase [class match -element -- $payload_lower matches_regex dg_swagwaf_jailbreak_patterns]
+if {$matched_phrase ne ""} {
+    set threat_level [class match -value -- $matched_phrase equals dg_swagwaf_jailbreak_patterns]
+    # HIGH -> 403, MEDIUM -> 400, LOW -> log only
+}
+```
+
+See [`examples/data-groups/`](examples/data-groups/) for the pattern file and automation tooling.
 
 ---
 
