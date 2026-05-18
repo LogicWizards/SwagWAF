@@ -1,5 +1,5 @@
 #--------------------------------------------------------------------------
-# iRule Name: SwagWAF - v0.2.6
+# iRule Name: SwagWAF - v0.3.0
 #--------------------------------------------------------------------------
 # ABSTRACT: "Poor Man's WAF for AI API Endpoints"
 # PURPOSE: Protect LLM/AI inference APIs from abuse, injection attacks, and
@@ -10,7 +10,11 @@
 #--------------------------------------------------------------------------
 # FEATURES:
 # - Bot detection via rate limiting (sliding window, violation tracking)
-# - Prompt injection pattern detection (AI-specific threat protection)
+# - Prompt injection detection via dg_injection_phrase data group (threat-level aware)
+#     HIGH   -> 403 block + violation points (3)
+#     MEDIUM -> 400 reject + violation point (1)
+#     LOW    -> log only, allow through
+#     Fallback: static hardcoded patterns if data group is not configured
 # - TLS 1.2+ enforcement (secure AI API communications)
 # - X-Forwarded-For sanitization (accurate client IP tracking)
 # - Security header hardening (HSTS, cache control, MIME sniffing prevention)
@@ -27,7 +31,13 @@ when RULE_INIT {
     set static::block_seconds 600    ;# 10 min block duration
    
     # === AI-SPECIFIC PROTECTION ===
-    # Prompt injection patterns (examples of common LLM jailbreak attempts)
+    # Primary injection detection uses the dg_injection_phrase data group (threat-level aware).
+    # See examples/data-groups/dg_injection_phrase.conf — that file is the ONLY place to
+    # add/remove/re-tier phrases. Do NOT duplicate the full list here.
+    #
+    # The static list below is a minimal last-resort fallback for environments where the
+    # data group has not been deployed yet. It is intentionally short and is NOT kept in
+    # sync with the data group.
     set static::injection_patterns {
         "ignore previous instructions"
         "disregard all prior"
@@ -122,27 +132,63 @@ when HTTP_REQUEST {
 when HTTP_REQUEST_DATA {
     set payload [HTTP::payload]
     set payload_lower [string tolower $payload]
-  
-    # Check for prompt injection patterns
-    foreach pattern $static::injection_patterns {
-        if {[string match -nocase "*$pattern*" $payload_lower]} {
-            set ip [IP::client_addr]
-            log local0. "INJECTION_ATTEMPT: $ip tried pattern: $pattern"
-          
-            # Increment violation counter (treat injection attempts seriously)
+    set ip [IP::client_addr]
+
+    # === PRIMARY: Data Group-Based Injection Detection ===
+    # dg_injection_phrase is an internal string data group: phrase := HIGH|MEDIUM|LOW
+    # class match -element returns the matching key (phrase) found in the payload.
+    # Falls back gracefully to static patterns if the data group is not configured.
+    if {[catch {
+        set matched_phrase [class match -element -- $payload_lower contains dg_injection_phrase]
+    } err]} {
+        if {$static::debug} { log local0. "<DEBUG>$ip: dg_injection_phrase unavailable, using static fallback: $err" }
+        set matched_phrase ""
+    }
+
+    if {$matched_phrase ne ""} {
+        set threat_level [class match -value -- $matched_phrase equals dg_injection_phrase]
+        if {$threat_level eq ""} { set threat_level "HIGH" }
+
+        log local0. "INJECTION_ATTEMPT: $ip phrase=\"$matched_phrase\" threat_level=$threat_level"
+
+        if {$threat_level eq "HIGH"} {
             set v [table incr "viol:$ip" 3]
             table timeout "viol:$ip" $static::violation_window_ms
-          
             if {$v >= $static::violation_threshold} {
-               table set "block:$ip" 1 $static::block_seconds
-               HTTP::respond 403 content "{\n  \"error\": \"forbidden\",\n  \"message\": \"Malicious payload detected\"\n}" "Content-Type" "application/json"
+                table set "block:$ip" 1 $static::block_seconds
+                HTTP::respond 403 content "{\n  \"error\": \"forbidden\",\n  \"message\": \"Malicious payload detected\"\n}" "Content-Type" "application/json"
                 return
-           }
-          
+            }
+            HTTP::respond 403 content "{\n  \"error\": \"forbidden\",\n  \"message\": \"Request rejected by security policy\"\n}" "Content-Type" "application/json"
+            return
+        } elseif {$threat_level eq "MEDIUM"} {
+            set v [table incr "viol:$ip" 1]
+            table timeout "viol:$ip" $static::violation_window_ms
             HTTP::respond 400 content "{\n  \"error\": \"invalid_request\",\n  \"message\": \"Request rejected by security policy\"\n}" "Content-Type" "application/json"
-           return
+            return
+        } else {
+            # LOW: log and allow through
+            if {$static::debug} { log local0. "<DEBUG>LOW_RISK: $ip phrase=\"$matched_phrase\" - passed through" }
+            return
         }
-   }
+    }
+
+    # === FALLBACK: Static Pattern Check ===
+    # Used when dg_injection_phrase data group is not configured on this BIG-IP.
+    foreach pattern $static::injection_patterns {
+        if {[string match -nocase "*$pattern*" $payload_lower]} {
+            log local0. "INJECTION_ATTEMPT: $ip pattern=\"$pattern\" (static fallback)"
+            set v [table incr "viol:$ip" 3]
+            table timeout "viol:$ip" $static::violation_window_ms
+            if {$v >= $static::violation_threshold} {
+                table set "block:$ip" 1 $static::block_seconds
+                HTTP::respond 403 content "{\n  \"error\": \"forbidden\",\n  \"message\": \"Malicious payload detected\"\n}" "Content-Type" "application/json"
+                return
+            }
+            HTTP::respond 400 content "{\n  \"error\": \"invalid_request\",\n  \"message\": \"Request rejected by security policy\"\n}" "Content-Type" "application/json"
+            return
+        }
+    }
 }
 
 #--------------------------------------------------------------------------

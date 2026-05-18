@@ -8,9 +8,6 @@
 SwagWAF is a lightweight, production-ready F5 iRule designed to protect modern web traffic, REST APIs, SLM/LLM endpoints, and Retrieval-Augmented Generation (RAG) workloads from abuse, injection attacks, and rapid-fire automation. It offloads practical DevSecOps security hardening best practices to BIG-IP while adding AI-aware Layer 7 protections that smaller teams can deploy quickly without the cost and complexity of an enterprise-tier WAF.
 
 ```bash
-# This is a stub the tree will look like this
-# but the iRule file is all you need to get started
-
 SwagWAF/
 ├── README.md
 ├── LICENSE
@@ -36,7 +33,7 @@ Originally developed as an AppWorld 2026 iRules contest entry, SwagWAF was recog
 
 ---
 
-![SwagWAF-Winner-Infographic](image-swagwaf-winner-infographic.png)
+![SwagWAF-Winner-Infographic](docs/images/swagwaf-infographic-award.png)
 
 
 ---
@@ -63,7 +60,7 @@ SwagWAF was built to provide a pragmatic middle ground: real protections, fast d
   - ### This is NOT just a “Poor Man's WAF”;
     - ### This is a lightweight **AI and API protection framework** implemented through an F5 iRule and designed to take advantage of BIG-IP's strengths for Layer 4 and Layer 7 traffic handling.
 
-![image-InspectionEngine](image-swagwaf-inspectionengine.png)
+![image-InspectionEngine](docs/images/swagwaf-inspectionengine.png)
 
 SwagWAF combines several protections into one deployable unit:
 
@@ -97,7 +94,7 @@ flowchart TD
 
 ---
 
-![image-keyfeatures](image-swagwaf-keyfeatures.png)
+![image-keyfeatures](docs/images/swagwaf-keyfeatures.png)
 
 SwagWAF is designed to evolve.
 
@@ -300,3 +297,4 @@ NYC
 `logicwizards.nyc`
 
 ---
+PORTS: SwagWAF can most likely be adapted to NGINX Open Source as a lightweight AI/API protection pattern, but the FOSS version is best implemented as NGINX + njs + generated policy includes, rather than as a direct one-to-one port of the BIG-IP iRule. 
