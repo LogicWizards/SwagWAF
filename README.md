@@ -13,7 +13,7 @@ SwagWAF/
 ├── LICENSE
 ├── .gitignore
 ├── src/
-│   └── iRule-SwagWAF-v0.2.6.tcl
+│   └── iRule-SwagWAF.tcl
 ├── docs/
 │   ├── images/
 │   │   ├── swagwaf-infographic-award.png

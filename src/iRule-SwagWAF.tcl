@@ -1,5 +1,6 @@
 #--------------------------------------------------------------------------
 # iRule Name: SwagWAF - v0.3.0
+# File:       iRule-SwagWAF.tcl  (version tracked via git tags, not filename)
 #--------------------------------------------------------------------------
 # ABSTRACT: "Poor Man's WAF for AI API Endpoints"
 # PURPOSE: Protect LLM/AI inference APIs from abuse, injection attacks, and
@@ -135,11 +136,12 @@ when HTTP_REQUEST_DATA {
     set ip [IP::client_addr]
 
     # === PRIMARY: Data Group-Based Injection Detection ===
-    # dg_injection_phrase is an internal string data group: phrase := HIGH|MEDIUM|LOW
-    # class match -element returns the matching key (phrase) found in the payload.
+    # dg_injection_phrase is an internal string data group: regex_pattern := HIGH|MEDIUM|LOW
+    # Keys are PCRE regex patterns matched against the lowercased payload.
+    # class match -element returns the pattern that matched; -value returns the threat level.
     # Falls back gracefully to static patterns if the data group is not configured.
     if {[catch {
-        set matched_phrase [class match -element -- $payload_lower contains dg_injection_phrase]
+        set matched_phrase [class match -element -- $payload_lower matches_regex dg_injection_phrase]
     } err]} {
         if {$static::debug} { log local0. "<DEBUG>$ip: dg_injection_phrase unavailable, using static fallback: $err" }
         set matched_phrase ""
