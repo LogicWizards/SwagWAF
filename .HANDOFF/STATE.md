@@ -1,16 +1,17 @@
 # State: SwagWAF
 
-**Last updated:** 2026-05-18 (session close)
-**Session:** 260518-swagwaf-polish
-**Branch:** `dev` (created this session — future work goes here)
+**Last updated:** 2026-05-21 (session in progress)
+**Session:** 260521-f5-pm-prep
+**Branch:** `dev` — 2 commits ahead of `main`, not yet pushed to `origin/dev`
 
 ---
 
 ## Current phase
 
-v0.3.1 tagged, released, and pushed to `main`. All v0.3.0/v0.3.1 polish work is
-committed. `dev` branch created from `main` HEAD as the working branch going forward.
-One user-owned README.md change is uncommitted (WIP — see open items).
+v0.3.1 on `main`. Active work on `dev`. README expanded with architecture positioning,
+known limitations, and roadmap sections in preparation for a call with an F5 Principal
+PM (F5XC WAAP, Gen AI roadmap). Call may be today (2026-05-21). `dev` commits are
+local-only pending push approval.
 
 ---
 
@@ -18,10 +19,11 @@ One user-owned README.md change is uncommitted (WIP — see open items).
 
 | ID | Item | Priority | Owner | Notes |
 |---|---|---|---|---|
-| SW-01 | Commit README.md tagline polish | Medium | Joe | User's WIP change: collapsed 3-line tagline + added "FREE BEER!" note + `<-- HEAVY LIFTING HERE` in file tree. Looks intentional — commit when satisfied. |
-| SW-02 | PORTS note in test-commands.md | Low | Agent | Deferred this session. A note about which ports the tests assume (443? 8443?) should be added to `examples/curl/test-commands.md`. |
-| SW-03 | Static fallback list audit | Low | Agent | The 8-entry built-in fallback list in the iRule predates the data group. Now that `dg_swagwaf_jailbreak_patterns` covers 54 patterns across 3 tiers, consider trimming the static list to a minimal "always-on" subset (HIGH-only, or remove overlap with DG). |
-| SW-04 | GitHub Actions lint/validate | Low | Agent | `.github/workflows/` exists but is likely empty. A minimal workflow that validates Tcl syntax or lints the data-group conf would improve contribution safety. |
+| SW-05 | Push `dev` to `origin/dev` | High | Joe | 2 commits local-only: README docs + .HANDOFF update. Waiting on push approval. |
+| SW-06 | PR `dev` → `main` + release v0.3.2 | Medium | Joe | After PM call — README additions warrant a patch release so main reflects current docs. |
+| SW-02 | PORTS note in test-commands.md | Low | Agent | Deferred. Add a callout near the top of `examples/curl/test-commands.md` documenting expected port (443 or 8443). |
+| SW-03 | Static fallback list audit | Low | Agent | The 8-entry built-in fallback list predates the DG. Consider trimming to HIGH-only or removing DG overlap. |
+| SW-04 | GitHub Actions lint/validate | Low | Agent | `.github/workflows/` exists but likely empty. |
 
 ---
 
@@ -52,3 +54,28 @@ One user-owned README.md change is uncommitted (WIP — see open items).
 | test-commands.md rewritten (3-tier, correct responses) | v0.3.1 | HIGH→403 (not 400); MEDIUM→400; LOW→200+log |
 | GitHub Releases for v0.3.0 and v0.3.1 | — | Both have release pages; v0.3.1 marked latest |
 | `dev` branch created | — | Future work off `dev`; PRs back to `main` |
+| README: architecture positioning + known limitations + expanded roadmap | dev/0f0feaa | Added 2026-05-21 for F5 PM call prep |
+| SW-01: README tagline polish committed | dev/0f0feaa | User's WIP (FREE BEER, </br> tagline, file tree annotation) included in same commit |
+
+---
+
+## F5 PM Call Context (2026-05-21)
+
+**Who:** Principal PM, F5 — owns F5XC WAAP Gen AI product roadmap (Jul 2024–present, SF Bay Area)
+
+**Key framing established this session:**
+- SwagWAF = network perimeter (BIG-IP LTM, HTTP proxy layer, PCRE)
+- F5 AI Guardrails = inference layer (CalypsoAI acquisition, $180M, Sep 2025, ML-based)
+- These are **complementary layers**, not competing products
+- F5XC WAAP is his platform — different from BIG-IP AWAF
+- Cloudflare displacement risk: app owners self-funding edge WAF when F5XC/BIG-IP VE can't be justified
+- Cloud-native billing opacity: ALB+WAF+API GW costs spread across 5 line items look "free"; BIG-IP VE is one visible line item and easier to challenge in budget review
+- SwagWAF fills the gap for BIG-IP shops that have the platform but not the enterprise WAF budget
+
+**Strong cards for the call:**
+1. Practitioner proof of the demand signal (built it before CalypsoAI acquisition)
+2. Cloudflare bleed pattern — real F5 accounts losing WAAP revenue to self-funded Cloudflare
+3. BIG-IP VE on Azure/AWS cost justification problem (TCO math vs. opaque cloud-native billing)
+4. InfoSec governance angle — DG-based pattern management keeps InfoSec in control without iRule access
+
+**Question to ask him:** Is F5XC WAAP designed to eventually replace BIG-IP AWAF for this use case, or are they expected to coexist long-term?
