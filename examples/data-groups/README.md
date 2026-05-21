@@ -45,10 +45,36 @@ curl -sk -X POST https://<vip>/api/v1/chat/completions \
 
 ## Overview
 
-SwagWAF's core protection is built into the iRule, but the detection patterns can be
-externalised into BIG-IP **string data groups** (class match). This separates the
-enforcement logic from the intelligence layer, allowing InfoSec and SIEM teams to
-update threat feeds out of band through automation or CI/CD.
+### The data group is optional
+
+SwagWAF ships with a built-in static fallback list and works out of the box with no data group deployed. 
+> The DG functionality is the **upgrade path**, not a prerequisite.
+> -- use it when you want the rules to be managed by InfoSec or a RedTeam 
+> -- or need to be updated by someone who shouldn't be messing with iRules
+>  -- or where you have a QA process that requires a (human in the loop) gate...  
+
+| State | What happens |
+|---|---|
+| DG **not deployed** | `RULE_INIT` sets `static::dg_jailbreak_ready 0`; iRule logs a WARNING and runs the built-in 8-pattern static fallback on every request automatically |
+| DG **deployed** | `RULE_INIT` sets `static::dg_jailbreak_ready 1`; full 3-tier detection (HIGH/MEDIUM/LOW) across 54 PCRE patterns from the conf file |
+
+To activate the DG after deploying it:
+```bash
+tmsh modify ltm rule SwagWAF { }   # re-triggers RULE_INIT
+```
+Confirm in `/var/log/ltm`: `SwagWAF: dg_swagwaf_jailbreak_patterns loaded OK`
+
+### Why use the data group (the governance story)
+
+The DG separates **enforcement logic** (the iRule — owned by networking/ops) from
+**detection intelligence** (the conf file — owned by InfoSec or SIEM teams).
+
+- InfoSec can add, remove, or retune patterns without touching the iRule
+- Pattern changes go through Git, code review, and CI/CD like any other policy change
+- The iRule is deployed once and stays stable; threat feeds update independently
+- Works naturally with automated threat intelligence pipelines
+
+This is the same governance model that enterprise WAF platforms charge for.
 
 ---
 

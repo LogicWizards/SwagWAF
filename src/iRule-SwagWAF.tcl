@@ -7,7 +7,7 @@
 #          bot scraping while enforcing security best practices
 # THEME: AI Infrastructure - Traffic management & security for AI workloads
 # CREATED: 2026-03-10 FOR: AppWorld 2026 iRules Contest
-# AUTHOR: Joe Negron <joe@logicwizards.nyc>
+# AUTHOR: Joe Negron <https://github.com/LogicWizards>
 #--------------------------------------------------------------------------
 # FEATURES:
 # - Bot detection via rate limiting (sliding window, violation tracking)

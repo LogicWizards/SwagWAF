@@ -88,15 +88,17 @@ flowchart TD
     B --> SWAGWAF
     SWAGWAF --> D[AI API Backends]
 
-    E[(Dynamic Data Groups)] --> SWAGWAF
-    F[Threat Feeds / CI-CD / Scheduled Updates] --> E
+    G[Built-in Static Fallback\n8 patterns — always active] --> C2
+    E[(dg_swagwaf_* Data Groups\noptional — 54 patterns, 3 tiers)] -.->|enhances| C2
+    F[InfoSec / CI-CD / Threat Feeds] --> E
 ```
 
 ---
 
 ### Where SwagWAF Fits in the AI Security Stack
 
-SwagWAF operates at the **BIG-IP network perimeter — the HTTP proxy layer**. It is not an inference-layer guardrail.
+SwagWAF operates at the **BIG-IP network perimeter — the HTTP proxy layer**. 
+  -- It is not an inference-layer guardrail.
 
 | Layer | What it does | Examples |
 |---|---|---|
@@ -104,7 +106,7 @@ SwagWAF operates at the **BIG-IP network perimeter — the HTTP proxy layer**. I
 | **Network perimeter** ← _SwagWAF_ | HTTP proxy-layer inspection; PCRE pattern matching; zero new infrastructure | SwagWAF on BIG-IP LTM |
 | **Application layer** | In-app input validation, output sanitization | Your API code |
 
-SwagWAF is the layer you deploy **today** on existing BIG-IP infrastructure while enterprise-tier AI guardrails solutions go through procurement. A mature deployment can run both layers in series — they are complementary, not competing.
+> SwagWAF is the layer you deploy **today - for FREE - and in about 5-minutes** on existing BIG-IP infrastructure while your enterprise-tier AI guardrails solutions go through procurement (or budget justifications). A mature deployment can (and probably should) run both layers in series — they are complementary, not competing. This SWAG will get you the proof you need that these types of threats are real with everyone scrambling to throw a bot in front of their existing Apps & APIs - just because they can..
 
 ---
 
@@ -129,6 +131,8 @@ This approach supports:
 * reusable protections across multiple VIPs and iRules
 * lower operational risk by updating intelligence out of band
 * stronger governance through Git and CI/CD-driven pattern changes
+
+there's more on that HERE --> [./examples/data-groups/README.md](./examples/data-groups/README.md)
 
 ---
 
@@ -207,7 +211,7 @@ SwagWAF is well suited for:
 
 ## Known Limitations
 
-Understanding what SwagWAF is and is not is part of deploying it correctly.
+Understanding what SwagWAF is (and IS-NOT) is part of deploying & utilizing it correctly.
 
 | Limitation | Detail |
 |---|---|
@@ -217,7 +221,7 @@ Understanding what SwagWAF is and is not is part of deploying it correctly.
 | **Shallow response inspection** | The `HTTP_RESPONSE` handler hardens security headers but does not inspect model output for data leakage, PII, or system prompt echoing |
 | **Patterns require maintenance** | The data group must be updated manually or via pipeline — novel attack patterns not in `dg_swagwaf_jailbreak_patterns` will not be detected |
 
-These are design constraints, not bugs. An inference-layer solution addresses several of these at the cost of additional infrastructure. SwagWAF is the right tool for the network perimeter tier.
+These are design constraints, not bugs. An inference-layer solution addresses several of these at the cost of additional infrastructure. SwagWAF is the right tool for the network perimeter tier, but it can just as easily be used in front of any web-app to add an additional layer of defense with little or no overhead.  
 
 ---
 
@@ -294,6 +298,10 @@ curl --tlsv1.1 https://your-api/
 /api/v1/images/generations := 5:5000
 ```
 
+### Documentation
+
+* **Deep-dive tech spec** — standalone reference doc covering the full algorithm walk-through, process flow, expected responses per threat tier, and deployment checklist; intended for operators who need more than the README
+
 ### Longer-term (requires iRule changes)
 
 * **Response inspection** — classify model output for data leakage (credentials, PII, system prompt echoing) in `HTTP_RESPONSE`
@@ -348,7 +356,7 @@ That recognition reflects the project’s core value proposition:
 **Joe Negron**
 DevSecOps Enterprise Automation Architect
 NYC
-`joe@logicwizards.nyc`
+[github.com/LogicWizards](https://github.com/LogicWizards)
 `logicwizards.nyc`
 
 ---
