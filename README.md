@@ -1,9 +1,7 @@
 # 🏆 SwagWAF — AI-Aware WAF for LLM APIs
 
 > **AppWorld 2026 Winner — Budget Bodyguard Award**
->  Lightweight ~  AI-Aware ~ Production-Ready  
-> An API Protection Framework Powered by f5-iRules
-> AI-aware Web App Firewall without the enterprise price tag.
+>  Lightweight ~  AI-Aware ~ Production-Ready </br> An API Protection Framework Powered by f5-iRules> </br> AI-aware Web App Firewall without the enterprise price tag.</br> **(It's actually 100% completely FREE - as in "FREE BEER!")**
 
 SwagWAF is a lightweight, production-ready F5 iRule designed to protect modern web traffic, REST APIs, SLM/LLM endpoints, and Retrieval-Augmented Generation (RAG) workloads from abuse, injection attacks, and rapid-fire automation. It offloads practical DevSecOps security hardening best practices to BIG-IP while adding AI-aware Layer 7 protections that smaller teams can deploy quickly without the cost and complexity of an enterprise-tier WAF.
 
@@ -13,7 +11,7 @@ SwagWAF/
 ├── LICENSE
 ├── .gitignore
 ├── src/
-│   └── iRule-SwagWAF.tcl
+│   └── iRule-SwagWAF.tcl   <-- ALL OF THE HEAVY LIFTING HAPPENS HERE!
 ├── docs/
 │   ├── images/
 │   │   ├── swagwaf-infographic-award.png
@@ -93,6 +91,20 @@ flowchart TD
     E[(Dynamic Data Groups)] --> SWAGWAF
     F[Threat Feeds / CI-CD / Scheduled Updates] --> E
 ```
+
+---
+
+### Where SwagWAF Fits in the AI Security Stack
+
+SwagWAF operates at the **BIG-IP network perimeter — the HTTP proxy layer**. It is not an inference-layer guardrail.
+
+| Layer | What it does | Examples |
+|---|---|---|
+| **Inference layer** | ML-based semantic inspection; model-aware; cloud-native | F5 AI Guardrails, LLM vendor moderation APIs |
+| **Network perimeter** ← _SwagWAF_ | HTTP proxy-layer inspection; PCRE pattern matching; zero new infrastructure | SwagWAF on BIG-IP LTM |
+| **Application layer** | In-app input validation, output sanitization | Your API code |
+
+SwagWAF is the layer you deploy **today** on existing BIG-IP infrastructure while enterprise-tier AI guardrails solutions go through procurement. A mature deployment can run both layers in series — they are complementary, not competing.
 
 ---
 
@@ -193,6 +205,21 @@ SwagWAF is well suited for:
 
 ---
 
+## Known Limitations
+
+Understanding what SwagWAF is and is not is part of deploying it correctly.
+
+| Limitation | Detail |
+|---|---|
+| **Regex-based, not ML** | Pattern matching can be evaded by novel phrasing, unicode substitution, or encoding tricks that bypass PCRE without matching known signatures |
+| **Per-request stateless** | Each request is evaluated independently — multi-turn jailbreaks that distribute an attack across a conversation thread are not detected |
+| **No token budget enforcement** | Low-frequency, high-payload requests that each cost significant inference spend are out of scope; SwagWAF controls request volume, not LLM economic cost |
+| **Shallow response inspection** | The `HTTP_RESPONSE` handler hardens security headers but does not inspect model output for data leakage, PII, or system prompt echoing |
+| **Patterns require maintenance** | The data group must be updated manually or via pipeline — novel attack patterns not in `dg_swagwaf_jailbreak_patterns` will not be detected |
+
+These are design constraints, not bugs. An inference-layer solution addresses several of these at the cost of additional infrastructure. SwagWAF is the right tool for the network perimeter tier.
+
+---
 
 ## Test Commands
 
@@ -250,10 +277,16 @@ curl --tlsv1.1 https://your-api/
 
 ## Roadmap
 
-* IP reputation hooks, even if initially stubbed for alerting
-* per-endpoint rate limiting via `dg_swagwaf_endpoint_limits` data group
+### Near-term (data group drop-ins — no iRule changes required)
 
-### Example: Endpoint-Specific Limits
+* `dg_swagwaf_sql_patterns` — SQL injection signatures
+* `dg_swagwaf_xss_patterns` — cross-site scripting signatures
+* `dg_swagwaf_bad_ips` — IP reputation blocklist
+* `dg_swagwaf_trusted_clients` — bypass list for high-volume trusted clients
+* `dg_swagwaf_endpoint_limits` — per-endpoint rate limits derived from `HTTP::path`
+* IP reputation hooks, even if initially stubbed for alerting
+
+#### Example: Endpoint-Specific Limits
 
 ```text
 /api/v1/chat/completions := 10:2000
@@ -261,7 +294,13 @@ curl --tlsv1.1 https://your-api/
 /api/v1/images/generations := 5:5000
 ```
 
-This would allow the iRule to derive rate limits from `HTTP::path` rather than using a single global threshold.
+### Longer-term (requires iRule changes)
+
+* **Response inspection** — classify model output for data leakage (credentials, PII, system prompt echoing) in `HTTP_RESPONSE`
+* **Token budget enforcement** — proxy-layer token estimation with per-client quotas; addresses financial DoS via large high-cost payloads
+* **Conversation fingerprinting** — detect slow-roll multi-turn jailbreaks by correlating session state across requests
+* **Automated pattern feeds** — pipeline integration to pull updated signatures into `dg_swagwaf_*` groups from threat intelligence sources
+* **`update-dg.py` dry-run mode** — validate and diff patterns locally before pushing to BIG-IP; safe for CI/CD pipelines
 
 ---
 
