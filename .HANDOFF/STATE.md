@@ -19,7 +19,7 @@ local-only pending push approval.
 
 | ID | Item | Priority | Owner | Notes |
 |---|---|---|---|---|
-| SW-05 | Push `dev` to `origin/dev` | High | Joe | 2 commits local-only: README docs + .HANDOFF update. Waiting on push approval. |
+| ~~SW-05~~ | ~~Push `dev` to `origin/dev`~~ | ~~High~~ | ~~Joe~~ | ✅ Done 2026-05-21. `e1693df..2648be2` pushed to `origin/dev`. |
 | SW-06 | PR `dev` → `main` + release v0.3.2 | Medium | Joe | After PM call — README additions warrant a patch release so main reflects current docs. |
 | SW-02 | PORTS note in test-commands.md | Low | Agent | Deferred. Add a callout near the top of `examples/curl/test-commands.md` documenting expected port (443 or 8443). |
 | SW-03 | Static fallback list audit | Low | Agent | The 8-entry built-in fallback list predates the DG. Consider trimming to HIGH-only or removing DG overlap. |
