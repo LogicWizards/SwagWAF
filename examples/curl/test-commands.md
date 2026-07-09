@@ -1,7 +1,12 @@
 # SwagWAF — curl Test Commands
 
-Quick reference for manual testing against a SwagWAF-protected endpoint.
-Replace `https://your-api` with your actual VIP hostname or IP.
+Set your VIP URL once — all commands use `$VIP` (full URL **including** `https://`):
+
+```bash
+VIP="https://claimqa.erp.fordham.edu"   # full URL
+```
+
+For automated assertions with pass/fail output, use [`test-swagwaf.sh`](test-swagwaf.sh) instead.
 
 ---
 
@@ -11,7 +16,7 @@ Send 15 rapid requests — expect a `429` after the 10th within the 2-second win
 
 ```bash
 for i in {1..15}; do
-  curl -sk -X POST https://your-api/v1/chat/completions \
+  curl -sk -X POST $VIP/v1/chat/completions \
     -H "Content-Type: application/json" \
     -d '{"prompt":"test"}' \
     -w "\nHTTP %{http_code}\n"
