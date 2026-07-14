@@ -2,11 +2,11 @@
 # iRule Name: SwagWAF
 # File:       iRule-SwagWAF.tcl  (version tracked via git tags, not filename)
 #--------------------------------------------------------------------------
-# ABSTRACT: "Poor Man's WAF for AI API Endpoints"
+# ABSTRACT: "Poor Man's WAF Enhanced for AI/API Endpoints"
 # PURPOSE: Protect LLM/AI inference APIs from abuse, injection attacks, and
 #          bot scraping while enforcing security best practices
 # THEME: AI Infrastructure - Traffic management & security for AI workloads
-# VERSION: 0.3.51
+# VERSION: 0.3.7
 # AUTHOR: Joe Negron <https://github.com/LogicWizards>
 # REPO: https://github.com/LogicWizards/SwagWAF
 # LICENSE: MIT (see LICENSE file in repo)
@@ -16,6 +16,10 @@
 #           - fixed class match -element -> -name; structured ISA security logging with XFF;
 #           - removed DG auto-detect probe (01070151 unfixable from Tcl); DG mode is now opt-in flag;
 #           - reverted: variable DG name bypasses link-time validation; auto-detect restored via catch
+# UPDATED: 260709  BY: JN — structured SWAGWAF|TRACE| logging (replaced <DEBUG> positional format);
+#           - v0.3.6: added dst=[IP::local_addr] to all log lines;
+#           - v0.3.6: added client_xff= (pre-sanitization XFF); src!=client_xff = spoofing indicator
+#           - v0.3.7: added src=IP:PORT and dst=IP:PORT format per ISA feedback (source/dest port for web server correlation)
 #--------------------------------------------------------------------------
 # FEATURES:
 # - Bot detection via rate limiting (sliding window, violation tracking)
@@ -79,16 +83,16 @@ when RULE_INIT {
    
     # === DEBUG LOGGING ===
     # QA MODE: debug=1 for ISA security log validation. Reset to 0 before production promotion.
-    set static::debug 1  ;# 0 = production | 1 = QA/debug (verbose security logs)
+    set static::debug 0  ;# 0 = production | 1 = QA/debug (verbose security logs)
 }
 
 #--------------------------------------------------------------------------
 # CLIENTSSL_HANDSHAKE - TLS Version Enforcement
 #--------------------------------------------------------------------------
 when CLIENTSSL_HANDSHAKE {
-    if {$static::debug} {log local0. "<DEBUG>[IP::client_addr]:[TCP::client_port]:[virtual name]:== TLS VERSION CHECK"}
+    if {$static::debug} {log local0. "SWAGWAF|TRACE|src=[IP::client_addr]:[TCP::client_port]|dst=[IP::local_addr]:[TCP::local_port]|vip=[virtual name]|event=TLS_CHECK|tls_ver=[SSL::cipher version]"}
     if {[SSL::cipher version] ne "TLSv1.2" && [SSL::cipher version] ne "TLSv1.3"} {
-        log local0. "SWAGWAF|TLS_REJECTED|src=[IP::client_addr]|vip=[virtual name]|tls_ver=[SSL::cipher version]"
+        log local0. "SWAGWAF|TLS_REJECTED|src=[IP::client_addr]:[TCP::client_port]|dst=[IP::local_addr]:[TCP::local_port]|vip=[virtual name]|tls_ver=[SSL::cipher version]"
         reject
     }
 }
@@ -98,18 +102,24 @@ when CLIENTSSL_HANDSHAKE {
 #--------------------------------------------------------------------------
 when HTTP_REQUEST {
     set ip [IP::client_addr]
+    set dst [IP::local_addr]
+    set sport [TCP::client_port]
+    set dport [TCP::local_port]
     set now [clock clicks -milliseconds]
     set window_start [expr {$now - $static::window_ms}]
     # === X-FORWARDED-FOR SANITIZATION ===
-    if {$static::debug} {log local0. "<DEBUG>$ip:[TCP::client_port]:[virtual name]:== SANITIZING XFF"} 
+    # Capture client-claimed XFF before overwriting — src != client_xff indicates spoofing attempt
+    set client_xff [HTTP::header "x-forwarded-for"]
+    if {$client_xff eq ""} { set client_xff "(none)" }
     HTTP::header remove x-forwarded-for
     HTTP::header insert x-forwarded-for [IP::remote_addr]
     HTTP::header remove X-Custom-XFF
     HTTP::header insert X-Custom-XFF [IP::remote_addr]
     set xff [HTTP::header "x-forwarded-for"]
+    if {$static::debug} {log local0. "SWAGWAF|TRACE|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=[HTTP::uri]|event=REQUEST"}
     # === CHECK IF IP IS BLOCKED ===
     if {[table lookup "block:$ip"] eq "1"} {
-        log local0. "SWAGWAF|BLOCKED_REPEAT|src=$ip|xff=$xff|vip=[virtual name]|method=[HTTP::method]|uri=[HTTP::uri]"
+        log local0. "SWAGWAF|BLOCKED_REPEAT|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=[HTTP::uri]"
         HTTP::respond 429 content "{\n  \"error\": \"rate_limit_exceeded\",\n  \"message\": \"Temporarily blocked for repeated abuse\",\n  \"retry_after\": 600\n}" "Content-Type" "application/json"
         return
     }
@@ -128,11 +138,11 @@ when HTTP_REQUEST {
         if {$v >= $static::violation_threshold} {
             # Block IP temporarily
             table set "block:$ip" 1 $static::block_seconds
-            log local0. "SWAGWAF|BLOCKED|src=$ip|xff=$xff|vip=[virtual name]|method=[HTTP::method]|uri=[HTTP::uri]|violations=$v"
+            log local0. "SWAGWAF|BLOCKED|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=[HTTP::uri]|violations=$v"
             HTTP::respond 429 content "{\n  \"error\": \"rate_limit_exceeded\",\n  \"message\": \"Blocked for repeated abuse\",\n  \"retry_after\": 600\n}" "Content-Type" "application/json"
             return
         }
-        log local0. "SWAGWAF|RATE_LIMITED|src=$ip|xff=$xff|vip=[virtual name]|method=[HTTP::method]|uri=[HTTP::uri]|req_count=$req_count|violations=$v"
+        log local0. "SWAGWAF|RATE_LIMITED|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=[HTTP::uri]|req_count=$req_count|violations=$v"
         HTTP::respond 429 content "{\n  \"error\": \"rate_limit_exceeded\",\n  \"message\": \"Too many requests - slow down\",\n  \"retry_after\": 2\n}" "Content-Type" "application/json"
         return
     }
@@ -170,14 +180,14 @@ when HTTP_REQUEST_DATA {
         set threat_level [class match -value -- $matched_phrase equals $static::dg_name]
         if {$threat_level eq ""} { set threat_level "HIGH" }
 
-        log local0. "SWAGWAF|INJECTION_ATTEMPT|src=$ip|xff=$xff|vip=[virtual name]|method=[HTTP::method]|uri=[HTTP::uri]|phrase=\"$matched_phrase\"|threat=$threat_level"
+        log local0. "SWAGWAF|INJECTION_ATTEMPT|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=[HTTP::uri]|phrase=\"$matched_phrase\"|threat=$threat_level"
 
         if {$threat_level eq "HIGH"} {
             set v [table incr "viol:$ip" 3]
             table timeout "viol:$ip" $static::violation_window_ms
             if {$v >= $static::violation_threshold} {
                 table set "block:$ip" 1 $static::block_seconds
-                log local0. "SWAGWAF|BLOCKED|src=$ip|xff=$xff|vip=[virtual name]|violations=$v|reason=injection_threshold"
+                log local0. "SWAGWAF|BLOCKED|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|violations=$v|reason=injection_threshold"
                 HTTP::respond 403 content "{\n  \"error\": \"forbidden\",\n  \"message\": \"Malicious payload detected\"\n}" "Content-Type" "application/json"
                 return
             }
@@ -190,7 +200,7 @@ when HTTP_REQUEST_DATA {
             return
         } else {
             # LOW: always log — ISA wants visibility on all security signals regardless of debug mode
-            log local0. "SWAGWAF|LOW_RISK|src=$ip|xff=$xff|vip=[virtual name]|method=[HTTP::method]|uri=[HTTP::uri]|phrase=\"$matched_phrase\""
+            log local0. "SWAGWAF|LOW_RISK|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=[HTTP::uri]|phrase=\"$matched_phrase\""
             return
         }
     }
@@ -199,12 +209,12 @@ when HTTP_REQUEST_DATA {
     # Used when dg_swagwaf_jailbreak_patterns data group is not configured on this BIG-IP.
     foreach pattern $static::injection_patterns {
         if {[string match -nocase "*$pattern*" $payload_lower]} {
-            log local0. "SWAGWAF|INJECTION_ATTEMPT|src=$ip|xff=$xff|vip=[virtual name]|method=[HTTP::method]|uri=[HTTP::uri]|phrase=\"$pattern\"|threat=HIGH|dg=static_fallback"
+            log local0. "SWAGWAF|INJECTION_ATTEMPT|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=[HTTP::uri]|phrase=\"$pattern\"|threat=HIGH|dg=static_fallback"
             set v [table incr "viol:$ip" 3]
             table timeout "viol:$ip" $static::violation_window_ms
             if {$v >= $static::violation_threshold} {
                 table set "block:$ip" 1 $static::block_seconds
-                log local0. "SWAGWAF|BLOCKED|src=$ip|xff=$xff|vip=[virtual name]|violations=$v|reason=injection_threshold|dg=static_fallback"
+                log local0. "SWAGWAF|BLOCKED|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|violations=$v|reason=injection_threshold|dg=static_fallback"
                 HTTP::respond 403 content "{\n  \"error\": \"forbidden\",\n  \"message\": \"Malicious payload detected\"\n}" "Content-Type" "application/json"
                 return
             }
@@ -218,7 +228,7 @@ when HTTP_REQUEST_DATA {
 # HTTP_RESPONSE - Security Header Hardening
 #--------------------------------------------------------------------------
 when HTTP_RESPONSE {
-    if {$static::debug} {log local0. "<DEBUG>[IP::client_addr]:[TCP::client_port]:[virtual name]:== SANITIZING RESPONSE HEADERS"}
+    if {$static::debug} {log local0. "SWAGWAF|TRACE|src=[IP::client_addr]:$sport|dst=[IP::local_addr]:$dport|vip=[virtual name]|event=RESPONSE_HEADERS"}
  
     # Remove server fingerprinting headers
     HTTP::header remove "Server"
@@ -236,7 +246,7 @@ when HTTP_RESPONSE {
     HTTP::header insert "X-Content-Type-Options" "nosniff"
    
     # === COOKIE HARDENING (Secure + HttpOnly) ===
-    if {$static::debug} {log local0. "<DEBUG>[IP::client_addr]:[TCP::client_port]:[virtual name]:== SECURING COOKIES"}
+    if {$static::debug} {log local0. "SWAGWAF|TRACE|src=[IP::client_addr]:$sport|dst=[IP::local_addr]:$dport|vip=[virtual name]|event=COOKIE_HARDENING"}
    
     # Use F5 native cookie security (faster than manual parsing)
     foreach cookieName [HTTP::cookie names] {

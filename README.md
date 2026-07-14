@@ -434,7 +434,64 @@ bash examples/curl/test-swagwaf.sh
 
 ---
 
-## Changelog
+## What's New in v0.3.6
+
+### Destination IP Logging (`dst=`)
+
+All security and trace log lines now include `dst=[IP::local_addr]` — the VIP's IP address. Useful for ISA to correlate which endpoint was targeted in multi-VIP deployments and to confirm traffic is hitting the intended VIP.
+
+### Pre-Sanitization XFF Capture (`client_xff=`)
+
+SwagWAF overwrites the `X-Forwarded-For` header with `IP::remote_addr` to prevent spoofing. The client-submitted value is now captured **before** sanitization and logged as `client_xff=`.
+
+When `src ≠ client_xff`, the client was submitting a false source IP — an actionable spoofing signal for ISA.
+
+```
+# Direct connection (no spoofing attempt):
+SWAGWAF|TRACE|src=10.10.1.5|xff=10.10.1.5|client_xff=(none)|dst=150.108.36.30|...
+
+# XFF spoofing attempt detected:
+SWAGWAF|INJECTION_ATTEMPT|src=10.10.1.5|xff=10.10.1.5|client_xff=1.2.3.4|dst=150.108.36.30|...
+#                                                        ^^ false IP the client claimed
+```
+
+Sumo Logic query to surface spoofing attempts:
+```
+_sourceCategory=qa/security/lb/f5 "SWAGWAF|"
+| parse "src=*|" as src
+| parse "client_xff=*|" as client_xff
+| parse "dst=*|" as dst
+| parse "vip=*|" as vip
+| parse "event=*" as event nodrop
+| parse "phrase=*|" as phrase nodrop
+| where client_xff != "(none)" and client_xff != src
+| fields _messageTime, src, client_xff, dst, vip, event, phrase
+```
+
+### Full log field reference (v0.3.6+)
+
+| Field | Source | Present on |
+|---|---|---|
+| `src=IP:PORT` | `IP::client_addr:TCP::client_port` | All events |
+| `xff=` | Sanitized `IP::remote_addr` | HTTP events |
+| `client_xff=` | Original client header (pre-sanitization) | HTTP events |
+| `dst=IP:PORT` | `IP::local_addr:TCP::local_port` (VIP IP:port) | All events |
+| `vip=` | `[virtual name]` | All events |
+| `method=` | `HTTP::method` | HTTP request events |
+| `uri=` | `HTTP::uri` | HTTP request events |
+| `phrase=` | Matched DG key or static pattern | Injection events |
+| `threat=` | HIGH / MEDIUM / LOW | Injection events |
+| `violations=` | Running violation count | BLOCKED / RATE_LIMITED |
+
+### v0.3.7 — 260709
+
+- **Port-embedded log format** — `src=IP:PORT` and `dst=IP:PORT` format per ISA feedback; enables correlation to web server access logs without separate `sport=`/`dport=` fields
+
+### v0.3.6 — 260709
+
+- **`dst=` field** — VIP IP address (`IP::local_addr`) added to all log lines; enables multi-VIP correlation
+- **`client_xff=` field** — pre-sanitization client-claimed XFF captured before overwrite; `src ≠ client_xff` is an XFF spoofing indicator; `(none)` when client sent no XFF header
+- **`SWAGWAF|TRACE|` format** — all `<DEBUG>` positional log lines replaced with structured key=value format; Sumo Logic field-parseable via `| parse`
 
 ### v0.3.2 — 260708
 

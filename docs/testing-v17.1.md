@@ -104,12 +104,41 @@ grep "SWAGWAF|BLOCKED" /var/log/ltm
 grep "SWAGWAF|RATE_LIMITED" /var/log/ltm
 ```
 
-### Expected log format
+### Expected log format (v0.3.6+)
 
 ```
-Jul  8 14:23:11 bigip01 info tmm[12345]: Rule /Common/ADMIN-SwagWAF <HTTP_REQUEST_DATA>: \
-  SWAGWAF|INJECTION_ATTEMPT|src=10.10.1.5|xff=10.10.1.5|vip=/Common/claimqa-vip|\
-  method=POST|uri=/v1/chat/completions|phrase="ignore previous instructions"|threat=HIGH
+Jul  9 14:23:11 bigip01 info tmm[12345]: Rule /Common/ADMIN-SwagWAF <HTTP_REQUEST_DATA>: \
+  SWAGWAF|INJECTION_ATTEMPT|src=10.10.1.5|xff=10.10.1.5|client_xff=(none)|dst=150.108.36.30|\
+  vip=/Common/S2DACMIMGTQA-F5_ERP_FORDHAM_EDU_443_FE_VIP|method=POST|\
+  uri=/v1/chat/completions|phrase="ignore previous instructions"|threat=HIGH
+```
+
+### Sumo Logic queries (log aggregator: `qa/security/lb/f5`)
+
+```
+# All SwagWAF events
+_sourceCategory=qa/security/lb/f5 "SWAGWAF|"
+
+# Security events only (no TRACE)
+_sourceCategory=qa/security/lb/f5 ("SWAGWAF|INJECTION_ATTEMPT" OR "SWAGWAF|BLOCKED" OR "SWAGWAF|RATE_LIMITED" OR "SWAGWAF|LOW_RISK" OR "SWAGWAF|TLS_REJECTED")
+
+# With field extraction
+_sourceCategory=qa/security/lb/f5 "SWAGWAF|"
+| parse "src=*|" as src
+| parse "xff=*|" as xff
+| parse "client_xff=*|" as client_xff
+| parse "dst=*|" as dst
+| parse "vip=*|" as vip
+| parse "phrase=*|" as phrase nodrop
+| parse "threat=*|" as threat nodrop
+| fields _messageTime, src, client_xff, dst, vip, phrase, threat
+
+# XFF spoofing detection
+_sourceCategory=qa/security/lb/f5 "SWAGWAF|"
+| parse "src=*|" as src
+| parse "client_xff=*|" as client_xff
+| where client_xff != "(none)" and client_xff != src
+| fields _messageTime, src, client_xff
 ```
 
 | Field | Value | Notes |

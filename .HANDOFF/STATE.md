@@ -1,8 +1,60 @@
 # State: SwagWAF
 
-**Last updated:** 2026-05-21 (session in progress)
-**Session:** 260521-f5-pm-prep
-**Branch:** `dev` — 2 commits ahead of `main`, not yet pushed to `origin/dev`
+**Last updated:** 260714
+**Session:** 260708-v17x-qa-isa
+**Branch:** `dev` — uncommitted changes staged for push to `origin/dev`
+**Version:** 0.3.7 (debug=0, production-ready)
+
+---
+
+## Current phase
+
+v0.3.7 on `dev`. ISA QA testing in progress against Fordham BIG-IP v17.1 (QA env:
+`claimqa.erp.fordham.edu`). iRule applies to VIP cleanly. Static fallback active (no
+DG deployed yet). Rate-limit and TRACE logging confirmed in Sumo Logic. Injection test
+pending (IP blocked during rate-limit test — clear table before testing). Ready to push
+`dev` → `origin/dev` and open PR to `main`.
+
+---
+
+## Open items
+
+| ID | Item | Priority | Owner | Notes |
+|---|---|---|---|---|
+| SW-06 | PR `dev` → `main` + release v0.3.7 | High | Joe | Commit message drafted. Push + PR pending. |
+| SW-ISA-01 | ISA injection detection test (isolated) | High | Joe | Clear block table first: `tmsh delete ltm table all` (QA only). Expect HTTP 400 + `SWAGWAF\|INJECTION_ATTEMPT` in Sumo Logic. |
+| SW-ISA-02 | Sumo Logic query validation | Medium | Joe/ISA | `_sourceCategory=qa/security/lb/f5 "SWAGWAF\|"` — confirm all event types visible. |
+| SW-ISA-03 | Deploy DG to activate 3-tier detection | Medium | Joe | `tmsh load sys config merge file dg_swagwaf_jailbreak_patterns.conf` → `tmsh modify ltm rule SwagWAF { }` → confirm `loaded OK (65 patterns)` in log. |
+| SW-04 | GitHub Actions lint/validate | Low | Agent | `.github/workflows/` still empty. |
+
+---
+
+## Completed (this project)
+
+| Item | Version | Notes |
+|---|---|---|
+| Core iRule — TLS, rate-limit, injection detection | v0.1–v0.2 | Contest entry |
+| AppWorld 2026 Budget Bodyguard Award | v0.2.6 | GitHub Release created |
+| Repo restructure (src/, examples/, docs/, .github/) | v0.3.0 | |
+| Data group-based threat detection (HIGH/MEDIUM/LOW) | v0.3.0 | 54 PCRE patterns |
+| `update-dg.py` iControl REST push tool | v0.3.0 | |
+| DG rename → `dg_swagwaf_jailbreak_patterns` namespace | v0.3.1 | |
+| `RULE_INIT` DG availability check (static flag) | v0.3.1 | |
+| v17.x compat: `matches_regex` → `contains` | v0.3.2 | PCRE alternation entries expanded to literals |
+| Tier detection fix: `-element` → `-name` | v0.3.2 | HIGH/MEDIUM/LOW now resolves correctly |
+| Variable DG name bypasses BIG-IP link-time VIP validation | v0.3.2 | Root cause: literal names validated at VIP-assign time, not runtime |
+| Auto-detect DG via `catch {class size $static::dg_name}` | v0.3.2 | No manual flag flip required |
+| Static fallback expanded 8 → 13 patterns | v0.3.2 | ignore/disregard variants added |
+| Structured `SWAGWAF\|TRACE\|` logging (replaced `<DEBUG>` positional) | v0.3.6 | Sumo Logic field-parseable |
+| `dst=` and `client_xff=` fields (spoofing detection) | v0.3.6 | src≠client_xff = XFF spoofing attempt |
+| `src=IP:PORT` / `dst=IP:PORT` format | v0.3.7 | Per ISA feedback for web server log correlation |
+| `debug=0` production default | v0.3.7 | TRACE logs silenced; security events always log |
+| `docs/testing-v17.1.md` — v17.x QA guide + Sumo Logic queries | — | |
+| `examples/curl/test-swagwaf.sh` — bash assertion suite | — | CI/CD compatible |
+| SW-02: test-commands.md VIP variable (`$VIP="https://..."`) | dev | |
+| SW-03: Static fallback audit | v0.3.2 | Expanded and synced with DG ignore/disregard variants |
+
+---
 
 ---
 
