@@ -7,7 +7,7 @@ that extend SwagWAF's intelligence without requiring iRule edits.
 
 ## Quick Start
 
-> **Prerequisites:** BIG-IP v15+ with Python 3.6, management API access, SwagWAF iRule already deployed.
+> **Prerequisites:** BIG-IP v15+, management access. No data group required to apply the iRule — the static fallback is active by default. Deploy the DG when ready to enable 3-tier detection.
 
 **Step 1 — Deploy the data group via tmsh** (simplest, no network access needed from your workstation):
 
@@ -24,13 +24,18 @@ python3 update-dg.py <bigip-mgmt-ip> <username>
 # prompts for password — never passed as an argument
 ```
 
-**Step 3 — Re-trigger RULE_INIT** so the iRule detects the new data group:
+**Step 3 — Re-trigger RULE_INIT** so the iRule auto-detects the new data group:
 
 ```bash
 tmsh modify ltm rule SwagWAF { }
-# Confirm in /var/log/ltm:
-#   SwagWAF: dg_swagwaf_jailbreak_patterns loaded OK
 ```
+
+Confirm in `/var/log/ltm`:
+```
+SwagWAF: dg_swagwaf_jailbreak_patterns loaded OK (65 patterns)
+```
+
+> The iRule uses `catch {class size $static::dg_name}` at RULE_INIT to detect the DG automatically. No manual flag change required.
 
 **Step 4 — Verify** with a test injection payload:
 
@@ -45,10 +50,36 @@ curl -sk -X POST https://<vip>/api/v1/chat/completions \
 
 ## Overview
 
-SwagWAF's core protection is built into the iRule, but the detection patterns can be
-externalised into BIG-IP **string data groups** (class match). This separates the
-enforcement logic from the intelligence layer, allowing InfoSec and SIEM teams to
-update threat feeds out of band through automation or CI/CD.
+### The data group is optional
+
+SwagWAF ships with a built-in static fallback list and works out of the box with no data group deployed. 
+> The DG functionality is the **upgrade path**, not a prerequisite.
+> -- use it when you want the rules to be managed by InfoSec or a RedTeam 
+> -- or need to be updated by someone who shouldn't be messing with iRules
+>  -- or where you have a QA process that requires a (human in the loop) gate...  
+
+| State | What happens |
+|---|---|
+| DG **not deployed** | `RULE_INIT` sets `static::dg_jailbreak_ready 0`; iRule logs a WARNING and runs the built-in 13-pattern static fallback on every request automatically |
+| DG **deployed** | `RULE_INIT` sets `static::dg_jailbreak_ready 1`; full 3-tier detection (HIGH/MEDIUM/LOW) across literal-substring patterns from the conf file |
+
+To activate the DG after deploying it:
+```bash
+tmsh modify ltm rule SwagWAF { }   # re-triggers RULE_INIT
+```
+Confirm in `/var/log/ltm`: `SwagWAF: dg_swagwaf_jailbreak_patterns loaded OK`
+
+### Why use the data group (the governance story)
+
+The DG separates **enforcement logic** (the iRule — owned by networking/ops) from
+**detection intelligence** (the conf file — owned by InfoSec or SIEM teams).
+
+- InfoSec can add, remove, or retune patterns without touching the iRule
+- Pattern changes go through Git, code review, and CI/CD like any other policy change
+- The iRule is deployed once and stays stable; threat feeds update independently
+- Works naturally with automated threat intelligence pipelines
+
+This is the same governance model that enterprise WAF platforms charge for.
 
 ---
 
@@ -67,8 +98,13 @@ update threat feeds out of band through automation or CI/CD.
 
 ## dg_swagwaf_jailbreak_patterns — Threat Levels
 
-Each record key is a PCRE regex pattern matched against the **lowercased** request payload.
+Each record key is a **literal substring** matched against the **lowercased** request payload.
 The value is the threat level that controls the iRule's response:
+
+> **BIG-IP v17.x compatibility note:** The `matches_regex` operator was removed from
+> `class match` in v17.x. SwagWAF now uses `contains` (literal substring matching).
+> Keys must be plain lowercase phrases — PCRE metacharacters (`(`, `)`, `|`, `.`, `*`, etc.)
+> are not interpreted and will be matched literally, likely producing no results.
 
 | Value | HTTP Response | Violation Points | Effect |
 |---|---|---|---|
@@ -81,7 +117,10 @@ The value is the threat level that controls the iRule's response:
 ```text
 ltm data-group internal /Common/dg_swagwaf_jailbreak_patterns {
     records {
-        "(ignore|disregard) (previous instructions|the above)" {
+        "ignore previous instructions" {
+            data HIGH
+        }
+        "disregard the above" {
             data HIGH
         }
         "hypothetically" {
@@ -103,8 +142,9 @@ The canonical file is [`dg_swagwaf_jailbreak_patterns.conf`](dg_swagwaf_jailbrea
 ## iRule Integration Pattern
 
 ```tcl
-# Primary: data group lookup (matches_regex for PCRE patterns)
-set matched_phrase [class match -element -- $payload_lower matches_regex dg_swagwaf_jailbreak_patterns]
+# Primary: data group lookup (contains = literal substring match, v15-v17+ compatible)
+# Use -name (not -element): -element returns a {name value} list which breaks the follow-up equals lookup
+set matched_phrase [class match -name -- $payload_lower contains dg_swagwaf_jailbreak_patterns]
 if {$matched_phrase ne ""} {
     set threat_level [class match -value -- $matched_phrase equals dg_swagwaf_jailbreak_patterns]
     if {$threat_level eq ""} { set threat_level "HIGH" }
@@ -120,8 +160,8 @@ if {$matched_phrase ne ""} {
             "Content-Type" "application/json"
         return
     } else {
-        # LOW: log and allow through
-        log local0. "LOW_RISK: $ip phrase=\"$matched_phrase\""
+        # LOW: always log (security signal regardless of debug mode)
+        log local0. "SWAGWAF|LOW_RISK|src=$ip|xff=$xff|vip=[virtual name]|method=[HTTP::method]|uri=[HTTP::uri]|phrase=\"$matched_phrase\""
     }
 }
 ```
