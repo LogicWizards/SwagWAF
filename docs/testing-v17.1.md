@@ -223,6 +223,6 @@ Verify the expected host/CIDR, metadata value, initialization log, and HA config
 | Issue | Status | Notes |
 |---|---|---|
 | TLS rejection test requires `--tls-max` flag | Open | macOS curl may not support `--tls-max`; use `openssl s_client -tls1_1` as alternative |
-| iRule table timeout units | Open | Preserve the device-validated v0.3.8 behavior for release; correct timeout units and repeat save/compile plus controlled expiry validation in the next version |
+| Corrected iRule table timeouts | Open | `dev` separates millisecond timestamp arithmetic from second-based table timeouts; repeat save/compile plus controlled expiry validation before promotion |
 | Trusted-source POC completion | Open | Confirm DG readback, untrusted negative test, policy metadata, and HA config sync |
 | Lite-rule convergence | Open | Identify owner; do not create a second trusted-source policy |

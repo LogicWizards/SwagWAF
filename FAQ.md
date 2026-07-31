@@ -16,8 +16,8 @@
 
 ## What is the current version?
 
-v0.3.8 is the current working version on `dev`. It is not yet a published release;
-the latest repository tag is v0.3.1.
+v0.3.8 is the latest published release. The `dev` branch contains post-release
+hardening that has not yet been promoted or tagged.
 
 ## Which BIG-IP versions are supported?
 
@@ -40,8 +40,9 @@ response hardening, and structured logging remain active. The trusted-source dat
 group is not a general WAF allowlist.
 
 In v0.3.8, the forwarded XFF header is rewritten before reaching the backend, but the
-client-submitted XFF and request URI are logged without field escaping. Treat those
-SIEM values as untrusted input until the next-version event-envelope work is complete.
+client-submitted XFF and request URI are logged without field escaping. The `dev`
+branch sanitizes those values before structured logging; the broader event-envelope
+normalization remains SW-28 follow-up work.
 
 ## Should each iRule or application have its own trusted-source data group?
 
@@ -107,9 +108,10 @@ F5 documentation.
 
 No. v0.3.8 preserves the BIG-IP 17.5 QA-pilot Tcl, where millisecond request-window
 values are also passed to BIG-IP table idle-timeout arguments. The `-notouch` change
-prevents blocked retries from renewing the block entry, but timeout-unit correction and
-controlled expiry validation remain next-version work. The HTTP `retry_after` value
-states configured policy intent, not proof of observed expiry duration.
+prevents blocked retries from renewing the block entry. The `dev` branch now separates
+millisecond timestamp arithmetic from second-based table timeouts, but save/compile and
+controlled expiry validation remain open. The HTTP `retry_after` value states configured
+policy intent, not proof of observed expiry duration.
 
 ## What about the full and lite iRule variants?
 

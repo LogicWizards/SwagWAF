@@ -351,9 +351,15 @@ curl -sk --tlsv1.1 --tls-max 1.1 $VIP/ -w "\nHTTP %{http_code}\n"
 
 ## What's New
 
-Only versions with documented changes are listed. v0.3.8 is the current release
-candidate being wrapped from `dev`; the latest published repository tag remains v0.3.1
-until the reviewed release commit is tagged.
+Only versions with documented changes are listed. v0.3.8 is the latest published
+release. The `dev` branch contains post-release timeout-unit and structured-log
+sanitation changes that still require BIG-IP save/compile and behavioral validation.
+
+### Unreleased — dev
+
+- Separated millisecond request-window arithmetic from second-based BIG-IP table idle timeouts.
+- Sanitized client-supplied XFF and URI values before writing structured SIEM fields.
+- Retained SW-28 follow-up work to normalize `policy`, `reason`, and `threat` across every event.
 
 ### v0.3.8 — 260730
 

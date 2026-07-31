@@ -10,15 +10,15 @@
 # VERSION:  0.3.8
 # ARCHITECT: JN
 # TECHLEAD: JN
-# STAGE:    RELEASE-CANDIDATE
+# STAGE:    POST-RELEASE-DEVELOPMENT
 # --------------------------------------------------------------------------
 ```
 
 ## Current Phase
 
-v0.3.8 is in a QA pilot on BIG-IP 17.5 and is being wrapped for public release. The full `/Common/ADMIN-SwagWAF` rule consumes the canonical trusted-source IP data group, logs structured events through F5 Syslog Forwarding to Sumo Logic, and uses `table lookup -notouch` so blocked retries do not renew the block idle timeout.
+v0.3.8 is published and tagged. The full `/Common/ADMIN-SwagWAF` rule consumes the canonical trusted-source IP data group, logs structured events through F5 Syslog Forwarding to Sumo Logic, and uses `table lookup -notouch` so blocked retries do not renew the block idle timeout.
 
-Committed history is linear: `main` is an ancestor of `dev` and has no unique commits. The release risk is content selection, not branch-conflict resolution. The public release must exclude `.HANDOFF` and other AI-development context.
+The public `v0.3.8` tag points to a handoff-free snapshot. `main` contains a later cleanup commit removing stale `.HANDOFF` files introduced by the v0.3.7 merge. `dev` retains the complete development handoffs and post-release hardening work.
 
 ## Verified v0.3.8 Evidence
 
@@ -33,12 +33,12 @@ Committed history is linear: `main` is an ancestor of `dev` and has no unique co
 
 | ID | Item | Priority | Owner | Notes |
 | --- | --- | --- | --- | --- |
-| SW-23 | Correct and validate iRule table timeout units | High | Agent/Joe | v0.3.8 preserves the device-validated 260730 Tcl. For the next version, separate millisecond timestamp arithmetic from second-based `table` idle timeouts, then save/compile and repeat controlled expiry validation on BIG-IP 17.5. |
+| SW-23 | Validate corrected iRule table timeout units | High | Joe | Implemented on `dev`: millisecond timestamp arithmetic is separate from second-based `table` idle timeouts. Save/compile and repeat controlled expiry validation on BIG-IP 17.5 before promotion. |
 | SW-24 | Benchmark with and without the iRule | Medium | Joe | Measure latency percentiles, throughput, errors, and TMM/CPU impact where available. |
 | SW-25 | Verify optional tiered jailbreak-pattern DG | Low | Joe | Confirm `RULE_INIT` state and MEDIUM/LOW records before requiring tier-specific assertions. |
 | SW-26 | Converge or retire `/Common/Admin-SwagWAF_lite` | Medium | Owner TBD | The independent variant must not gain a separate trusted-source policy. |
-| SW-27 | Build selective public v0.3.8 release commit | High | Agent/Joe | Exclude `.HANDOFF`, generated files, and AI-development artifacts; review before commit or tag. |
-| SW-28 | Normalize and sanitize the structured event envelope | High | Agent/ISA | Make `policy`, `reason`, and `threat` queryable on every event using explicit neutral values when not applicable; sanitize client-supplied URI/XFF values; preserve backward-compatible event names. Defer implementation until after v0.3.8. |
+| SW-27 | Build selective public v0.3.8 release commit | Complete | Agent/Joe | Published tag `v0.3.8` without `.HANDOFF`; stale handoffs were subsequently removed from `main`. |
+| SW-28 | Normalize the structured event envelope | High | Agent/ISA | URI/XFF sanitation is implemented on `dev`. Make `policy`, `reason`, and `threat` queryable on every event using explicit neutral values when not applicable; preserve backward-compatible event names. |
 | SW-29 | Repeat controlled block-expiry validation | Medium | Joe | Sumo identified the synthetic source as `10.224.244.7`; access later returned, but a VPN source change was not ruled out. Record source before block, during retry, and after expiry. |
 
 ## Provisional Expiry Evidence
@@ -47,8 +47,8 @@ The 260731 Sumo query separated trusted monitor sources from the synthetic clien
 
 ## Release Decision
 
-Release plain `v0.3.8`; pre-1.0 status already communicates API maturity. Keep `.HANDOFF` on `dev`, include public code, examples, tests, FAQ, README, and operator documentation, and pause for exact file-set review before commit, tag, merge, or push.
+Plain `v0.3.8` is published. Keep `.HANDOFF` on `dev`; do not add it back to `main` or future public release trees.
 
 ## Next Action
 
-Run the final offline gate, create the already-approved selective public release commit without `.HANDOFF`, verify the commit tree, tag plain `v0.3.8`, and push. Preserve SW-23, SW-28, and SW-29 on `dev` for the next version.
+Validate the restored timeout-unit and structured-log sanitation changes on BIG-IP 17.5, then continue SW-28 event-envelope normalization and SW-29 controlled expiry testing on `dev`.
