@@ -1,133 +1,54 @@
 # State: SwagWAF
 
-**Last updated:** 260714
-**Session:** 260708-v17x-qa-isa
-**Branch:** `dev` — uncommitted changes staged for push to `origin/dev`
-**Version:** 0.3.7 (debug=0, production-ready)
+```
+# --------------------------------------------------------------------------
+# NOTES:    STATE.md
+# --------------------------------------------------------------------------
+# ABSTRACT: Current v0.3.8 QA, release-wrap, evidence, and follow-up state.
+# CREATED:  260518 BY: JN
+# UPDATED:  260731 BY: Sol(GPT5.6)::Copilot:MAC-00
+# VERSION:  0.3.8
+# ARCHITECT: JN
+# TECHLEAD: JN
+# STAGE:    RELEASE-CANDIDATE
+# --------------------------------------------------------------------------
+```
 
----
+## Current Phase
 
-## Current phase
+v0.3.8 is in a QA pilot on BIG-IP 17.5 and is being wrapped for public release. The full `/Common/ADMIN-SwagWAF` rule consumes the canonical trusted-source IP data group, logs structured events through F5 Syslog Forwarding to Sumo Logic, and uses `table lookup -notouch` so blocked retries do not renew the block idle timeout.
 
-v0.3.7 on `dev`. ISA QA testing in progress against Fordham BIG-IP v17.1 (QA env:
-`claimqa.erp.fordham.edu`). iRule applies to VIP cleanly. Static fallback active (no
-DG deployed yet). Rate-limit and TRACE logging confirmed in Sumo Logic. Injection test
-pending (IP blocked during rate-limit test — clear table before testing). Ready to push
-`dev` → `origin/dev` and open PR to `main`.
+Committed history is linear: `main` is an ancestor of `dev` and has no unique commits. The release risk is content selection, not branch-conflict resolution. The public release must exclude `.HANDOFF` and other AI-development context.
 
----
+## Verified v0.3.8 Evidence
 
-## Open items
+- Full-rule save/compile on BIG-IP 17.5, canonical-DG initialization, policy metadata, non-trusted rate limiting, DG readback, and HA sync were verified.
+- Sumo received full-rule `TRUSTED_SOURCE` events after cutover.
+- Authorized synthetic tests generated `INJECTION_ATTEMPT`, `BLOCKED`, and `BLOCKED_REPEAT` while trusted-source events continued, proving that the exception bypasses rate limiting without bypassing payload inspection.
+- A built-in fallback phrase was rejected with HTTP 400. MEDIUM-tier phrases reached the backend with HTTP 404, consistent with the optional tiered jailbreak-pattern DG being absent, uninitialized, or missing those records on this VIP.
+- PyST v0.1.4 discovered and ran `tests/python/test_post_deploy.py` through the working `/Users/jnegron9/DATA/miners/ipscan/pyst.py` runtime.
+- A 260731 `tmsh list ltm rule ADMIN-SwagWAF` scrape matched the release source's behavior-critical trusted-source, `-notouch`, timeout, and logging paths. HTML-rendered `&#8212;` sequences in pasted comments were treated as transport substitutions, not source changes.
 
-| ID | Item | Priority | Owner | Notes |
-|---|---|---|---|---|
-| SW-06 | PR `dev` → `main` + release v0.3.7 | High | Joe | Commit message drafted. Push + PR pending. |
-| SW-ISA-01 | ISA injection detection test (isolated) | High | Joe | Clear block table first: `tmsh delete ltm table all` (QA only). Expect HTTP 400 + `SWAGWAF\|INJECTION_ATTEMPT` in Sumo Logic. |
-| SW-ISA-02 | Sumo Logic query validation | Medium | Joe/ISA | `_sourceCategory=qa/security/lb/f5 "SWAGWAF\|"` — confirm all event types visible. |
-| SW-ISA-03 | Deploy DG to activate 3-tier detection | Medium | Joe | `tmsh load sys config merge file dg_swagwaf_jailbreak_patterns.conf` → `tmsh modify ltm rule SwagWAF { }` → confirm `loaded OK (65 patterns)` in log. |
-| SW-04 | GitHub Actions lint/validate | Low | Agent | `.github/workflows/` still empty. |
-
----
-
-## Completed (this project)
-
-| Item | Version | Notes |
-|---|---|---|
-| Core iRule — TLS, rate-limit, injection detection | v0.1–v0.2 | Contest entry |
-| AppWorld 2026 Budget Bodyguard Award | v0.2.6 | GitHub Release created |
-| Repo restructure (src/, examples/, docs/, .github/) | v0.3.0 | |
-| Data group-based threat detection (HIGH/MEDIUM/LOW) | v0.3.0 | 54 PCRE patterns |
-| `update-dg.py` iControl REST push tool | v0.3.0 | |
-| DG rename → `dg_swagwaf_jailbreak_patterns` namespace | v0.3.1 | |
-| `RULE_INIT` DG availability check (static flag) | v0.3.1 | |
-| v17.x compat: `matches_regex` → `contains` | v0.3.2 | PCRE alternation entries expanded to literals |
-| Tier detection fix: `-element` → `-name` | v0.3.2 | HIGH/MEDIUM/LOW now resolves correctly |
-| Variable DG name bypasses BIG-IP link-time VIP validation | v0.3.2 | Root cause: literal names validated at VIP-assign time, not runtime |
-| Auto-detect DG via `catch {class size $static::dg_name}` | v0.3.2 | No manual flag flip required |
-| Static fallback expanded 8 → 13 patterns | v0.3.2 | ignore/disregard variants added |
-| Structured `SWAGWAF\|TRACE\|` logging (replaced `<DEBUG>` positional) | v0.3.6 | Sumo Logic field-parseable |
-| `dst=` and `client_xff=` fields (spoofing detection) | v0.3.6 | src≠client_xff = XFF spoofing attempt |
-| `src=IP:PORT` / `dst=IP:PORT` format | v0.3.7 | Per ISA feedback for web server log correlation |
-| `debug=0` production default | v0.3.7 | TRACE logs silenced; security events always log |
-| `docs/testing-v17.1.md` — v17.x QA guide + Sumo Logic queries | — | |
-| `examples/curl/test-swagwaf.sh` — bash assertion suite | — | CI/CD compatible |
-| SW-02: test-commands.md VIP variable (`$VIP="https://..."`) | dev | |
-| SW-03: Static fallback audit | v0.3.2 | Expanded and synced with DG ignore/disregard variants |
-
----
-
----
-
-## Current phase
-
-v0.3.1 on `main`. Active work on `dev`. README expanded with architecture positioning,
-known limitations, and roadmap sections in preparation for a call with an F5 Principal
-PM (F5XC WAAP, Gen AI roadmap). Call may be today (2026-05-21). `dev` commits are
-local-only pending push approval.
-
----
-
-## Open items
+## Open Items
 
 | ID | Item | Priority | Owner | Notes |
-|---|---|---|---|---|
-| ~~SW-05~~ | ~~Push `dev` to `origin/dev`~~ | ~~High~~ | ~~Joe~~ | ✅ Done 2026-05-21. `e1693df..2648be2` pushed to `origin/dev`. |
-| SW-06 | PR `dev` → `main` + release v0.3.2 | Medium | Joe | After PM call — README additions warrant a patch release so main reflects current docs. |
-| SW-02 | PORTS note in test-commands.md | Low | Agent | Deferred. Add a callout near the top of `examples/curl/test-commands.md` documenting expected port (443 or 8443). |
-| SW-03 | Static fallback list audit | Low | Agent | The 8-entry built-in fallback list predates the DG. Consider trimming to HIGH-only or removing DG overlap. |
-| SW-04 | GitHub Actions lint/validate | Low | Agent | `.github/workflows/` exists but likely empty. |
+| --- | --- | --- | --- | --- |
+| SW-23 | Correct and validate iRule table timeout units | High | Agent/Joe | v0.3.8 preserves the device-validated 260730 Tcl. For the next version, separate millisecond timestamp arithmetic from second-based `table` idle timeouts, then save/compile and repeat controlled expiry validation on BIG-IP 17.5. |
+| SW-24 | Benchmark with and without the iRule | Medium | Joe | Measure latency percentiles, throughput, errors, and TMM/CPU impact where available. |
+| SW-25 | Verify optional tiered jailbreak-pattern DG | Low | Joe | Confirm `RULE_INIT` state and MEDIUM/LOW records before requiring tier-specific assertions. |
+| SW-26 | Converge or retire `/Common/Admin-SwagWAF_lite` | Medium | Owner TBD | The independent variant must not gain a separate trusted-source policy. |
+| SW-27 | Build selective public v0.3.8 release commit | High | Agent/Joe | Exclude `.HANDOFF`, generated files, and AI-development artifacts; review before commit or tag. |
+| SW-28 | Normalize and sanitize the structured event envelope | High | Agent/ISA | Make `policy`, `reason`, and `threat` queryable on every event using explicit neutral values when not applicable; sanitize client-supplied URI/XFF values; preserve backward-compatible event names. Defer implementation until after v0.3.8. |
+| SW-29 | Repeat controlled block-expiry validation | Medium | Joe | Sumo identified the synthetic source as `10.224.244.7`; access later returned, but a VPN source change was not ruled out. Record source before block, during retry, and after expiry. |
 
----
+## Provisional Expiry Evidence
 
-## Backlog (future enhancements)
+The 260731 Sumo query separated trusted monitor sources from the synthetic client. The monitor addresses `150.108.2.177`, `150.108.2.153`, and `150.108.4.66` emitted named trusted policies; synthetic tests came from untrusted source `10.224.244.7` with `policy=N/A` and generated two `INJECTION_ATTEMPT`, one `BLOCKED`, and two `BLOCKED_REPEAT` events. Access to `claimqa.erp.fordham.edu` later returned. This is consistent with block expiry and `-notouch`, but remains provisional because the VPN reconnect may have changed the client address.
 
-| ID | Task | Notes |
-|---|---|---|
-| SW-10 | Additional data group patterns | `dg_swagwaf_*` namespace is established — future DGs for other categories (e.g., PII patterns, known-bad UAs) can drop in without iRule changes |
-| SW-11 | Rate-limit per-endpoint support | Currently global violation counter. Per-VIP or per-URI threshold would reduce false positives on high-traffic endpoints. |
-| SW-12 | `update-dg.py` dry-run flag | `--dry-run` mode: parse conf, validate patterns, print what would be PUT/POSTed — without hitting BIG-IP. Useful for CI. |
-| SW-13 | BYOD pattern for update-dg.py | Script already derives DG name from conf header — document the pattern so others can reuse it for non-jailbreak DGs. |
+## Release Decision
 
----
+Release plain `v0.3.8`; pre-1.0 status already communicates API maturity. Keep `.HANDOFF` on `dev`, include public code, examples, tests, FAQ, README, and operator documentation, and pause for exact file-set review before commit, tag, merge, or push.
 
-## Completed (this project)
+## Next Action
 
-| Item | Version | Notes |
-|---|---|---|
-| Core iRule — TLS, UA, rate-limit, injection detection | v0.1.x–v0.2.x | Contest entry |
-| AppWorld 2026 Budget Bodyguard Award | v0.2.6 | GitHub Release created |
-| Repo restructure (src/, examples/, docs/, .github/) | v0.3.0 | `iRule-SwagWAF.tcl` filename de-versioned |
-| Data group-based threat detection (HIGH/MEDIUM/LOW) | v0.3.0 | `dg_swagwaf_jailbreak_patterns`, 54 PCRE patterns |
-| `update-dg.py` iControl REST push tool | v0.3.0 | stdlib-only; upsert (PUT→POST fallback) |
-| DG rename: `dg_injection_phrase` → `dg_swagwaf_jailbreak_patterns` | v0.3.1 | GUI readability, `dg_swagwaf_*` namespace |
-| `RULE_INIT` DG availability check (static flag) | v0.3.1 | Eliminated per-request `catch` overhead |
-| `update-dg.py` future-proofed (conf as arg, name from header) | v0.3.1 | Works for any `dg_swagwaf_*.conf` |
-| `static::debug` default → 0 | v0.3.1 | Opt-in for deployment verification |
-| test-commands.md rewritten (3-tier, correct responses) | v0.3.1 | HIGH→403 (not 400); MEDIUM→400; LOW→200+log |
-| GitHub Releases for v0.3.0 and v0.3.1 | — | Both have release pages; v0.3.1 marked latest |
-| `dev` branch created | — | Future work off `dev`; PRs back to `main` |
-| README: architecture positioning + known limitations + expanded roadmap | dev/0f0feaa | Added 2026-05-21 for F5 PM call prep |
-| SW-01: README tagline polish committed | dev/0f0feaa | User's WIP (FREE BEER, </br> tagline, file tree annotation) included in same commit |
-
----
-
-## F5 PM Call Context (2026-05-21)
-
-**Who:** Principal PM, F5 — owns F5XC WAAP Gen AI product roadmap (Jul 2024–present, SF Bay Area)
-
-**Key framing established this session:**
-- SwagWAF = network perimeter (BIG-IP LTM, HTTP proxy layer, PCRE)
-- F5 AI Guardrails = inference layer (CalypsoAI acquisition, $180M, Sep 2025, ML-based)
-- These are **complementary layers**, not competing products
-- F5XC WAAP is his platform — different from BIG-IP AWAF
-- Cloudflare displacement risk: app owners self-funding edge WAF when F5XC/BIG-IP VE can't be justified
-- Cloud-native billing opacity: ALB+WAF+API GW costs spread across 5 line items look "free"; BIG-IP VE is one visible line item and easier to challenge in budget review
-- SwagWAF fills the gap for BIG-IP shops that have the platform but not the enterprise WAF budget
-
-**Strong cards for the call:**
-1. Practitioner proof of the demand signal (built it before CalypsoAI acquisition)
-2. Cloudflare bleed pattern — real F5 accounts losing WAAP revenue to self-funded Cloudflare
-3. BIG-IP VE on Azure/AWS cost justification problem (TCO math vs. opaque cloud-native billing)
-4. InfoSec governance angle — DG-based pattern management keeps InfoSec in control without iRule access
-
-**Question to ask him:** Is F5XC WAAP designed to eventually replace BIG-IP AWAF for this use case, or are they expected to coexist long-term?
+Run the final offline gate, create the already-approved selective public release commit without `.HANDOFF`, verify the commit tree, tag plain `v0.3.8`, and push. Preserve SW-23, SW-28, and SW-29 on `dev` for the next version.

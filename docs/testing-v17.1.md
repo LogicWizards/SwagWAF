@@ -1,15 +1,16 @@
-# SwagWAF — BIG-IP v17.1 QA Validation Guide
+# SwagWAF — BIG-IP v17.x QA Validation Guide
 
 ```
 # --------------------------------------------------------------------------
 # NOTES:    testing-v17.1.md
 # --------------------------------------------------------------------------
-# ABSTRACT: QA testing guide for SwagWAF v0.3.2 on BIG-IP v17.1.
-#     Covers known v17.x behavioral differences, deployment validation,
-#     log verification, and ISA evidence collection.
+# ABSTRACT: QA testing guide for SwagWAF v0.3.8 on BIG-IP v17.x, including
+#     deployment, trusted-source policy, logs, and ISA evidence collection.
 # CREATED:  260708 BY: Claude(Sonnet4.6)::Copilot
-# UPDATED:  260708 BY: Claude(Sonnet4.6)::Copilot
-# VERSION:  0.1.0
+# UPDATED:  260730 BY: JN
+# VERSION:  0.3.8
+# ARCHITECT: JN
+# TECHLEAD: JN
 # STAGE:    ACTIVE
 # --------------------------------------------------------------------------
 ```
@@ -28,7 +29,9 @@
 
 ## Pre-Flight: Apply the iRule to a VIP
 
-SwagWAF v0.3.2 uses a variable DG reference to bypass the v17.x link-time validation. No data group needs to exist before the iRule is applied.
+SwagWAF v0.3.8 uses variable DG references to bypass v17.x link-time validation. No
+data group needs to exist before the iRule is applied. The jailbreak-pattern and
+trusted-source readiness checks fail independently at `RULE_INIT`.
 
 ```bash
 # Apply via tmsh (replace partition/name as needed)
@@ -41,10 +44,10 @@ Expected in `/var/log/ltm` (no `01070151` errors):
 SwagWAF: dg_swagwaf_jailbreak_patterns not deployed — static fallback active (13 patterns)
 ```
 
-If you see `01070151` errors, the running iRule is a pre-v0.3.2 version with a literal DG reference. Verify the correct version is applied:
+If you see `01070151` errors, the running iRule may use a literal DG reference. Verify
+that both optional names are assigned to variables:
 ```bash
-tmsh list ltm rule /Common/ADMIN-SwagWAF | grep dg_name
-# Should show: set static::dg_name "dg_swagwaf_jailbreak_patterns"
+tmsh list ltm rule /Common/ADMIN-SwagWAF | grep -E 'dg_name|trusted_sources_dg'
 ```
 
 ---
@@ -66,10 +69,10 @@ SwagWAF smoke tests — https://claimqa.erp.fordham.edu
 [ 1 ] Clean request baseline
   PASS  Clean request not blocked (HTTP 200)
 
-[ 2 ] Injection detection — HIGH tier (expect 403)
-  PASS  HIGH injection blocked (HTTP 403)
+[ 2 ] Injection detection — HIGH tier (expect 403 DG or 400 fallback)
+  PASS  HIGH injection rejected (HTTP 400)
 
-[ 3 ] Rate limiting — 12 rapid requests (expect at least one 429)
+[ 3 ] Rate limiting — 110 requests at concurrency 25
   PASS  Rate limit triggered (HTTP 429)
 
 [ 4 ] Security headers
@@ -150,6 +153,18 @@ _sourceCategory=qa/security/lb/f5 "SWAGWAF|"
 | `threat=` | HIGH / MEDIUM / LOW | Tier from DG; always HIGH in static fallback |
 | `dg=static_fallback` | Present when DG not deployed | Confirms fallback path |
 
+### Trusted-source evidence
+
+With `/Common/dg_swagwaf_trusted_sources` deployed, send traffic from a matching host
+or CIDR and confirm the canonical record and metadata are visible:
+
+```bash
+grep 'SWAGWAF|TRUSTED_SOURCE' /var/log/ltm | tail
+```
+
+Then repeat the burst from an untrusted source and confirm `RATE_LIMITED` or `BLOCKED`.
+A trusted source bypasses only rate limiting; injection tests must still be rejected.
+
 ---
 
 ## DG Activation Validation (Optional — when DG is available)
@@ -164,7 +179,7 @@ tmsh modify ltm rule /Common/ADMIN-SwagWAF { }
 
 # 3. Confirm auto-detection in /var/log/ltm
 grep "SwagWAF:" /var/log/ltm | tail -5
-# Expected: SwagWAF: dg_swagwaf_jailbreak_patterns loaded OK (65 patterns)
+# Expected: SwagWAF: dg_swagwaf_jailbreak_patterns loaded OK (68 patterns)
 
 # 4. Re-run smoke tests — injection now goes through DG path
 export VIP="https://claimqa.erp.fordham.edu"
@@ -173,6 +188,17 @@ bash examples/curl/test-swagwaf.sh
 # 5. Confirm DG path in logs (no "dg=static_fallback" tag)
 grep "SWAGWAF|INJECTION_ATTEMPT" /var/log/ltm | tail -5
 ```
+
+For the trusted-source POC, deploy and read back the canonical IP group separately:
+
+```bash
+tmsh load sys config merge file /path/to/dg_swagwaf_trusted_sources.conf
+tmsh list ltm data-group internal /Common/dg_swagwaf_trusted_sources
+tmsh modify ltm rule /Common/ADMIN-SwagWAF { }
+tmsh save sys config
+```
+
+Verify the expected host/CIDR, metadata value, initialization log, and HA config sync.
 
 ---
 
@@ -187,13 +213,16 @@ grep "SWAGWAF|INJECTION_ATTEMPT" /var/log/ltm | tail -5
 | Security headers enforced | `curl -skI https://<vip>/ \| grep -E "Strict-Transport\|Cache-Control\|X-Content"` |
 | Server fingerprint headers removed | `curl -skI https://<vip>/ \| grep -E "^Server:\|^X-Powered"` (should return nothing) |
 | Smoke test suite passes | `bash examples/curl/test-swagwaf.sh` → `0 failed` |
+| Trusted source matches canonical policy | `SWAGWAF\|TRUSTED_SOURCE` includes `matched=`, `policy=`, and `action=rate_limit_bypass` |
+| Untrusted source remains limited | Burst produces `SWAGWAF\|RATE_LIMITED` or `SWAGWAF\|BLOCKED` |
 
 ---
 
-## Known Issues / Open Items (260708)
+## Known Issues / Open Items (260730)
 
 | Issue | Status | Notes |
 |---|---|---|
 | TLS rejection test requires `--tls-max` flag | Open | macOS curl may not support `--tls-max`; use `openssl s_client -tls1_1` as alternative |
-| `static::debug 1` set for QA cycle | **Must reset before production** | Change to `0` and re-save iRule before promotion |
-| DG not yet deployed on QA box | Open | Testing in static fallback mode; DG path to be validated separately |
+| iRule table timeout units | Open | Preserve the device-validated v0.3.8 behavior for release; correct timeout units and repeat save/compile plus controlled expiry validation in the next version |
+| Trusted-source POC completion | Open | Confirm DG readback, untrusted negative test, policy metadata, and HA config sync |
+| Lite-rule convergence | Open | Identify owner; do not create a second trusted-source policy |

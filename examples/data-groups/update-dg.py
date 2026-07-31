@@ -46,27 +46,69 @@ DEFAULT_CONF = Path(__file__).parent / "dg_swagwaf_jailbreak_patterns.conf"
 
 def parse_dg_meta(path):
     """
-    Extract partition and DG name from the conf header line:
+    Extract partition, DG name, and type from the conf:
       ltm data-group internal /Common/dg_name {
-    Returns: (partition, dg_name)
+        type string|ip
+    Returns: (partition, dg_name, dg_type)
     """
-    m = re.search(r'ltm data-group internal /([\w-]+)/([\S]+)\s*\{', path.read_text())
-    if not m:
+    text = path.read_text()
+    header = re.search(r'ltm data-group internal /([\w-]+)/([\S]+)\s*\{', text)
+    dg_type = re.search(r'^\s*type\s+(string|ip)\s*$', text, re.MULTILINE)
+    if not header:
         raise ValueError(f"Cannot determine DG name/partition from {path}")
-    return m.group(1), m.group(2)
+    if not dg_type:
+        raise ValueError(f"Cannot determine DG type from {path}")
+    return header.group(1), header.group(2), dg_type.group(1)
 
 
 def parse_conf(path):
     """
     Parse an ltm data-group internal conf snippet into REST record dicts.
-    Matches:  "key" { data VALUE }
+    Matches quoted keys with quoted or unquoted data values.
     Returns:  [{"name": key, "data": value}, ...]
     """
-    pattern = re.compile(r'"([^"]+)"\s*\{\s*data\s+(\w+)\s*\}', re.DOTALL)
-    records = [{"name": m.group(1), "data": m.group(2)}
-               for m in pattern.finditer(path.read_text())]
+    quoted = r'((?:\\.|[^"\\])*)'
+    pattern = re.compile(
+        rf'"{quoted}"\s*\{{\s*data\s+(?:"{quoted}"|([^\s}}]+))\s*\}}',
+        re.DOTALL,
+    )
+    text = path.read_text()
+    records_body = re.search(
+        r'^\s*records\s*\{(?P<body>.*?)^\s*\}\s*\n\s*type\s+(?:string|ip)\s*$',
+        text,
+        re.MULTILINE | re.DOTALL,
+    )
+    if not records_body:
+        raise ValueError(f"Cannot isolate records block from {path}")
+
+    body = records_body.group("body")
+
+    def has_unparsed_content(gap):
+        return any(
+            line.strip() and not line.lstrip().startswith("#")
+            for line in gap.splitlines()
+        )
+
+    records = []
+    position = 0
+    for match in pattern.finditer(body):
+        if has_unparsed_content(body[position:match.start()]):
+            raise ValueError(f"Unparsed content in {path}; refusing destructive replacement")
+        name = json.loads(f'"{match.group(1)}"')
+        data = (
+            json.loads(f'"{match.group(2)}"')
+            if match.group(2) is not None
+            else match.group(3)
+        )
+        records.append({"name": name, "data": data})
+        position = match.end()
     if not records:
         raise ValueError(f"No records parsed from {path}")
+    if has_unparsed_content(body[position:]):
+        raise ValueError(f"Unparsed content in {path}; refusing destructive replacement")
+    names = [record["name"] for record in records]
+    if len(names) != len(set(names)):
+        raise ValueError(f"Duplicate record names in {path}; refusing destructive replacement")
     return records
 
 
@@ -103,7 +145,7 @@ def main():
         print(f"ERROR: conf file not found: {conf_file}", file=sys.stderr)
         sys.exit(1)
 
-    partition, dg_name = parse_dg_meta(conf_file)
+    partition, dg_name, dg_type = parse_dg_meta(conf_file)
     password = getpass.getpass(f"BIG-IP password for {username}@{bigip}: ")
     auth     = "Basic " + b64encode(f"{username}:{password}".encode()).decode()
 
@@ -113,7 +155,7 @@ def main():
     payload = {
         "name":      dg_name,
         "partition": partition,
-        "type":      "string",
+        "type":      dg_type,
         "records":   records,
     }
 

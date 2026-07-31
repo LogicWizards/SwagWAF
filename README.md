@@ -1,13 +1,28 @@
 # 🏆 SwagWAF — AI-Aware WAF for LLM APIs
 
-> **AppWorld 2026 Winner — Budget Bodyguard Award**
->  Lightweight ~  AI-Aware ~ Production-Ready </br> An API Protection Framework Powered by f5-iRules> </br> AI-aware Web App Firewall without the enterprise price tag.</br> **(It's actually 100% completely FREE - as in "FREE BEER!")**
+```
+# --------------------------------------------------------------------------
+# NOTES:    README.md
+# --------------------------------------------------------------------------
+# ABSTRACT: Project overview, deployment guidance, capabilities, testing,
+#     limitations, roadmap, and release history for SwagWAF.
+# CREATED:  260310 BY: JN
+# UPDATED:  260731 BY: Sol(GPT5.6)::Copilot:MAC-00
+# VERSION:  0.3.8
+# ARCHITECT: JN
+# TECHLEAD: JN
+# --------------------------------------------------------------------------
+```
 
-SwagWAF is a lightweight, production-ready F5 iRule designed to protect modern web traffic, REST APIs, SLM/LLM endpoints, and Retrieval-Augmented Generation (RAG) workloads from abuse, injection attacks, and rapid-fire automation. It offloads practical DevSecOps security hardening best practices to BIG-IP while adding AI-aware Layer 7 protections that smaller teams can deploy quickly without the cost and complexity of an enterprise-tier WAF.
+> **AppWorld 2026 Winner — Budget Bodyguard Award**
+>  Lightweight ~  AI-Aware ~ QA-Validated on BIG-IP 17.5 </br> An API Protection Framework Powered by f5-iRules> </br> AI-aware Web App Firewall without the enterprise price tag.</br> **(It's actually 100% completely FREE - as in "FREE BEER!")**
+
+SwagWAF is a lightweight F5 iRule designed to protect modern web traffic, REST APIs, SLM/LLM endpoints, and Retrieval-Augmented Generation (RAG) workloads from abuse, injection attacks, and rapid-fire automation. It offloads practical DevSecOps security hardening best practices to BIG-IP while adding AI-aware Layer 7 protections that smaller teams can deploy quickly without the cost and complexity of an enterprise-tier WAF. Validate it on the exact target TMOS release and traffic profile before production promotion.
 
 ```bash
 SwagWAF/
 ├── README.md
+├── FAQ.md
 ├── LICENSE
 ├── .gitignore
 ├── src/
@@ -26,7 +41,12 @@ SwagWAF/
 │   └── data-groups/
 │       ├── README.md
 │       ├── dg_swagwaf_jailbreak_patterns.conf
+│       ├── dg_swagwaf_trusted_sources.conf
 │       └── update-dg.py
+├── tests/
+│   ├── README.md                <-- authorized post-deploy test runbook
+│   └── python/
+│       └── test_post_deploy.py  <-- stdlib, pytest, and PyST-discoverable checks
 └── .github/
     └── workflows/
 ```
@@ -116,7 +136,7 @@ SwagWAF operates at the **BIG-IP network perimeter — the HTTP proxy layer**.
 
 SwagWAF is designed to evolve.
 
-Instead of hardcoding all intelligence directly into the iRule forever, the protection model can be extended through **externally managed BIG-IP data groups**. This keeps runtime enforcement fast while allowing patterns, reputation data, trusted-client bypasses, and endpoint-specific controls to be updated out of band.
+Instead of hardcoding all intelligence directly into the iRule forever, the protection model can be extended through **externally managed BIG-IP data groups**. This keeps runtime enforcement fast while allowing patterns, reputation data, trusted-source rate-limit exceptions, and endpoint-specific controls to be updated out of band.
 
 Potential dynamic data groups include:
 
@@ -124,7 +144,7 @@ Potential dynamic data groups include:
 * `dg_swagwaf_sql_patterns`
 * `dg_swagwaf_xss_patterns`
 * `dg_swagwaf_bad_ips`
-* `dg_swagwaf_trusted_clients`
+* `dg_swagwaf_trusted_sources`
 * `dg_swagwaf_endpoint_limits`
 
 This approach supports:
@@ -235,13 +255,13 @@ These are design constraints, not bugs. An inference-layer solution addresses se
 > ```
 
 ```bash
-# Test rate limiting (should 429 after 10 req in 2 seconds)
-for i in {1..15}; do
-  curl -sk -X POST $VIP/v1/chat/completions \
+# Test rate limiting from an untrusted QA source.
+# v0.3.8 default: 100 requests in a 2-second sliding window.
+seq 1 110 | xargs -P25 -I{} \
+  curl -sk -X POST "$VIP/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -d '{"prompt":"test"}' \
-    -w "\nHTTP %{http_code}\n"
-done
+    -o /dev/null -w "%{http_code}\n"
 
 # Test prompt injection detection (expect HTTP 400)
 curl -sk -X POST $VIP/v1/chat/completions \
@@ -279,24 +299,31 @@ curl -sk --tlsv1.1 --tls-max 1.1 $VIP/ -w "\nHTTP %{http_code}\n"
 
 ## Production Deployment Checklist
 
-* [ ] Test on F5 v21+
+* [ ] Test on the target BIG-IP release; v17.5 is the current direct QA evidence
 * [ ] Tune `max_requests` for real traffic patterns
+* [ ] Validate iRule table timeout units on the target TMOS release
 * [ ] Add provider-specific injection patterns
 * [ ] Monitor `/var/log/ltm` for false positives
 * [ ] Set `static::debug 0` in production
-* [ ] Define bypass procedures for trusted high-volume clients
+* [ ] Manage trusted high-volume sources in the canonical `dg_swagwaf_trusted_sources` IP data group
 * [ ] Deploy `dg_swagwaf_jailbreak_patterns` and re-trigger RULE_INIT to activate 3-tier detection
+* [ ] Read back deployed data groups and verify HA config sync
 
 ---
 
 ## Roadmap
+
+### Current v0.3.8
+
+* `dg_swagwaf_trusted_sources` — one canonical IP data group for host/CIDR rate-limit exceptions
+* auditable owner, service, ticket, and expiry metadata in `SWAGWAF|TRUSTED_SOURCE` events
+* governed desired-state automation and rule-variant convergence as described in the project roadmap below
 
 ### Near-term (data group drop-ins — no iRule changes required)
 
 * `dg_swagwaf_sql_patterns` — SQL injection signatures
 * `dg_swagwaf_xss_patterns` — cross-site scripting signatures
 * `dg_swagwaf_bad_ips` — IP reputation blocklist
-* `dg_swagwaf_trusted_clients` — bypass list for high-volume trusted clients
 * `dg_swagwaf_endpoint_limits` — per-endpoint rate limits derived from `HTTP::path`
 * IP reputation hooks, even if initially stubbed for alerting
 
@@ -322,202 +349,52 @@ curl -sk --tlsv1.1 --tls-max 1.1 $VIP/ -w "\nHTTP %{http_code}\n"
 
 ---
 
-## What's New in v0.3.0
+## What's New
 
-### Data Group-Based Threat Detection
+Only versions with documented changes are listed. v0.3.8 is the current release
+candidate being wrapped from `dev`; the latest published repository tag remains v0.3.1
+until the reviewed release commit is tagged.
 
-Injection detection is now driven by a BIG-IP internal data group (`dg_swagwaf_jailbreak_patterns`) with three threat levels:
+### v0.3.8 — 260730
 
-| Threat Level | Response | Violation Points |
-|---|---|---|
-| `HIGH` | 403 Forbidden | +3 |
-| `MEDIUM` | 400 Bad Request | +1 |
-| `LOW` | Log only, allow through | 0 |
-
-The iRule falls back to a minimal static pattern list if the data group is not deployed.
-
-```tcl
-# BIG-IP v15-v17+ compatible (matches_regex removed in v17.x; using contains)
-# Use -name (not -element) so matched_phrase is the key string for the follow-up equals lookup
-set matched_phrase [class match -name -- $payload_lower contains dg_swagwaf_jailbreak_patterns]
-if {$matched_phrase ne ""} {
-    set threat_level [class match -value -- $matched_phrase equals dg_swagwaf_jailbreak_patterns]
-    # HIGH -> 403, MEDIUM -> 400, LOW -> log only
-}
-```
-
-See [`examples/data-groups/`](examples/data-groups/) for the pattern file and automation tooling.
-
----
-
-## What's New in v0.3.2
-
-### BIG-IP v17.x Compatibility
-
-`matches_regex` was removed as a `class match` operator in BIG-IP v17.x. Attempting to save the iRule on v17+ produced a parse-time error that prevented the rule from loading at all:
-
-```
-error: ["matches_regex is unexpected; it should be one of 'contains ends_with equals starts_with'"]
-```
-
-SwagWAF now uses `contains` (literal substring matching) — compatible with BIG-IP v15 through v21+.
-
-### Variable DG Name — No Deployment Prerequisite
-
-BIG-IP validates **literal** data group names in `class` operations at VIP-assignment time (not runtime). An iRule containing `class match ... dg_swagwaf_jailbreak_patterns` (literal) cannot be applied to a VIP unless that data group already exists — even if the code path is never executed.
-
-SwagWAF now stores the DG name in a variable:
-
-```tcl
-set static::dg_name "dg_swagwaf_jailbreak_patterns"
-```
-
-Variable references bypass the static link-time check. The iRule applies to any VIP with no DG deployed. Auto-detection at RULE_INIT uses `catch {class size $static::dg_name}` — a runtime check that works correctly because BIG-IP cannot validate variable-referenced names at link time.
-
-```tcl
-if {[catch {class size $static::dg_name} dg_count]} {
-    set static::dg_jailbreak_ready 0   ;# static fallback active
-} else {
-    set static::dg_jailbreak_ready 1   ;# DG loaded, 3-tier detection active
-    log local0. "SwagWAF: $static::dg_name loaded OK ($dg_count patterns)"
-}
-```
-
-To activate 3-tier detection after deploying the DG, re-trigger RULE_INIT:
-```bash
-tmsh modify ltm rule SwagWAF { }
-```
-
-### Data Group Pattern Expansion
-
-Six entries in `dg_swagwaf_jailbreak_patterns.conf` used PCRE alternation groups (e.g., `"(ignore|disregard) (previous instructions|delimiters|the above)"`). These cannot be used with the `contains` operator and were expanded into individual literal entries. Detection coverage is equivalent; entry count increased from 54 to ~65.
-
-### Static Fallback Expanded: 8 → 13 Patterns
-
-The built-in static fallback (active when the DG is not deployed) was expanded from 8 to 13 patterns by adding the `ignore`/`disregard` variant phrases that were previously only in the DG.
-
-### Tier Detection Fix
-
-`class match -element` returns a `{name value}` list — not just the key name. When that list was subsequently used as the key in the follow-up `equals` lookup to resolve the threat tier, the lookup always failed and silently defaulted every detection to `HIGH`. Fixed to `-name` so HIGH / MEDIUM / LOW tiers now resolve correctly.
-
-### Structured Security Logging with XFF
-
-All security events now emit a consistent, parseable record to `/var/log/ltm`:
-
-```
-SWAGWAF|<EVENT>|src=<ip>|xff=<xff>|vip=<vip>|method=<method>|uri=<uri>[|phrase="..."|threat=<level>]
-```
-
-| Event | Trigger |
-|---|---|
-| `TLS_REJECTED` | Client connected below TLS 1.2 |
-| `BLOCKED_REPEAT` | IP is in the block table from a prior violation window |
-| `BLOCKED` | Violation threshold crossed — IP is now blocked |
-| `RATE_LIMITED` | Request velocity exceeded the sliding window limit |
-| `INJECTION_ATTEMPT` | HIGH or MEDIUM phrase matched in payload |
-| `LOW_RISK` | LOW phrase matched — always logged, request passes through |
-
-The `xff=` value is F5-sanitized (`IP::remote_addr`) — it reflects the actual TCP source seen by BIG-IP and cannot be spoofed by a client-controlled header.
-
-LOW-tier events now always log regardless of `static::debug` mode.
-
-### Smoke Test Script
-
-`examples/curl/test-swagwaf.sh` — bash assertion suite covering: clean baseline, HIGH injection block (403), rate limiting (429), security headers present/absent. Non-zero exit on any failure; CI/CD compatible.
-
-```bash
-export VIP="https://your-vip.example.com"
-bash examples/curl/test-swagwaf.sh
-```
-
-> **QA note:** `static::debug` is set to `1` for the current QA cycle. Reset to `0` before promoting to production.
-
----
-
-## What's New in v0.3.6
-
-### Destination IP Logging (`dst=`)
-
-All security and trace log lines now include `dst=[IP::local_addr]` — the VIP's IP address. Useful for ISA to correlate which endpoint was targeted in multi-VIP deployments and to confirm traffic is hitting the intended VIP.
-
-### Pre-Sanitization XFF Capture (`client_xff=`)
-
-SwagWAF overwrites the `X-Forwarded-For` header with `IP::remote_addr` to prevent spoofing. The client-submitted value is now captured **before** sanitization and logged as `client_xff=`.
-
-When `src ≠ client_xff`, the client was submitting a false source IP — an actionable spoofing signal for ISA.
-
-```
-# Direct connection (no spoofing attempt):
-SWAGWAF|TRACE|src=10.10.1.5|xff=10.10.1.5|client_xff=(none)|dst=150.108.36.30|...
-
-# XFF spoofing attempt detected:
-SWAGWAF|INJECTION_ATTEMPT|src=10.10.1.5|xff=10.10.1.5|client_xff=1.2.3.4|dst=150.108.36.30|...
-#                                                        ^^ false IP the client claimed
-```
-
-Sumo Logic query to surface spoofing attempts:
-```
-_sourceCategory=qa/security/lb/f5 "SWAGWAF|"
-| parse "src=*|" as src
-| parse "client_xff=*|" as client_xff
-| parse "dst=*|" as dst
-| parse "vip=*|" as vip
-| parse "event=*" as event nodrop
-| parse "phrase=*|" as phrase nodrop
-| where client_xff != "(none)" and client_xff != src
-| fields _messageTime, src, client_xff, dst, vip, event, phrase
-```
-
-### Full log field reference (v0.3.6+)
-
-| Field | Source | Present on |
-|---|---|---|
-| `src=IP:PORT` | `IP::client_addr:TCP::client_port` | All events |
-| `xff=` | Sanitized `IP::remote_addr` | HTTP events |
-| `client_xff=` | Original client header (pre-sanitization) | HTTP events |
-| `dst=IP:PORT` | `IP::local_addr:TCP::local_port` (VIP IP:port) | All events |
-| `vip=` | `[virtual name]` | All events |
-| `method=` | `HTTP::method` | HTTP request events |
-| `uri=` | `HTTP::uri` | HTTP request events |
-| `phrase=` | Matched DG key or static pattern | Injection events |
-| `threat=` | HIGH / MEDIUM / LOW | Injection events |
-| `violations=` | Running violation count | BLOCKED / RATE_LIMITED |
+- Raised the default rate ceiling from 10 to 100 requests per sliding window.
+- Added optional `/Common/dg_swagwaf_trusted_sources`, one canonical `type ip` data group for trusted host/CIDR rate-limit exceptions.
+- Added `SWAGWAF|TRUSTED_SOURCE` events with matched record and sanitized owner/service/ticket/expiry policy metadata.
+- Trusted sources bypass rate limiting only; TLS, XFF sanitation, payload inspection, response hardening, and logging remain active.
+- Changed block checks to `table lookup -notouch` so retries do not renew the block idle timeout.
+- Extended `update-dg.py` to derive string/IP types, preserve quoted metadata values, and refuse partial destructive replacements.
 
 ### v0.3.7 — 260709
 
-- **Port-embedded log format** — `src=IP:PORT` and `dst=IP:PORT` format per ISA feedback; enables correlation to web server access logs without separate `sport=`/`dport=` fields
+- Embedded source and destination ports in `src=IP:PORT` and `dst=IP:PORT` fields for ISA correlation with web-server access logs.
+- Set `static::debug 0` as the production default.
 
 ### v0.3.6 — 260709
 
-- **`dst=` field** — VIP IP address (`IP::local_addr`) added to all log lines; enables multi-VIP correlation
-- **`client_xff=` field** — pre-sanitization client-claimed XFF captured before overwrite; `src ≠ client_xff` is an XFF spoofing indicator; `(none)` when client sent no XFF header
-- **`SWAGWAF|TRACE|` format** — all `<DEBUG>` positional log lines replaced with structured key=value format; Sumo Logic field-parseable via `| parse`
+- Added VIP destination details to every security and trace event.
+- Captured the client-submitted XFF value before sanitation as `client_xff=`; a value different from `src` is a spoofing signal.
+- Replaced positional debug logs with structured `SWAGWAF|TRACE|key=value` events.
 
 ### v0.3.2 — 260708
 
-- **v17.x compat** — `matches_regex` removed from `class match`; switched to `contains` (literal substring); iRule now compiles on v17–v21+
-- **Variable DG name** — DG referenced via `$static::dg_name`; bypasses BIG-IP link-time VIP-assignment validation; iRule applies to any VIP with no DG deployed; auto-detection restored via `catch {class size $static::dg_name}`
-- **Tier detection fix** — `-element` → `-name` in DG lookup; HIGH/MEDIUM/LOW tiers now resolve correctly instead of silently defaulting to HIGH
-- **DG pattern expansion** — 6 PCRE alternation entries expanded into individual literal entries; coverage equivalent
-- **Static fallback expanded** — 8 → 13 patterns (ignore/disregard variant phrases added)
-- **Structured logging** — `SWAGWAF|EVENT|src|xff|vip|method|uri|...` format across all security event handlers
-- **LOW-risk always logs** — LOW-tier detections no longer gated behind `static::debug`
-- **QA mode** — `static::debug 1`; reset to `0` before production promotion
-- **Smoke test script** — `examples/curl/test-swagwaf.sh` with HTTP assertion tests; CI/CD compatible
+- Replaced removed v17.x `matches_regex` class matching with literal `contains` matching.
+- Referenced optional data groups through variables so an absent DG does not prevent VIP assignment.
+- Corrected tier resolution from `class match -element` to `-name`.
+- Expanded PCRE-style alternations into literal entries and expanded the static fallback from 8 to 13 patterns.
+- Added structured security events and an automated curl smoke-test script.
 
 ### v0.3.1 — 260310
 
-- First post-contest release; `dg_swagwaf_jailbreak_patterns` pattern library published with 54 entries across HIGH / MEDIUM / LOW tiers
+- Published the first post-contest release and the 54-entry HIGH/MEDIUM/LOW jailbreak-pattern data group.
 
 ### v0.3.0 — 260310
 
-- AppWorld 2026 contest release
-- DG-based 3-tier injection detection replacing static-only fallback
-- `dg_jailbreak_ready` probe in `RULE_INIT` for graceful fallback when DG is not deployed
+- Published the AppWorld 2026 contest release.
+- Added three-tier data-group injection detection with static fallback behavior.
 
-### v0.2.x and earlier
+### v0.2.6 and earlier
 
-- Initial development; core protections: rate limiting, TLS enforcement, XFF sanitization, static injection patterns, security header and cookie hardening
+- Established rate limiting, TLS enforcement, XFF sanitation, static injection detection, security headers, and cookie hardening.
 
 ---
 

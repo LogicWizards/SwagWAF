@@ -8,6 +8,20 @@ versions: v0.3.2 → v0.3.7
 
 # SESSION — SwagWAF v17.x QA / ISA Validation (260708–260714)
 
+```
+# --------------------------------------------------------------------------
+# NOTES:    README.md
+# --------------------------------------------------------------------------
+# ABSTRACT: Historical v17.x QA and ISA validation session record for
+#     SwagWAF versions v0.3.2 through v0.3.7.
+# CREATED:  260708 BY: JN
+# UPDATED:  260731 BY: Sol(GPT5.6)::Copilot:MAC-00
+# VERSION:  0.3.7
+# ARCHITECT: JN
+# TECHLEAD: JN
+# --------------------------------------------------------------------------
+```
+
 ---
 
 ## SBAR

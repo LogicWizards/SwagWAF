@@ -7,6 +7,20 @@ branch: dev
 
 # SESSION — SwagWAF v0.3.x Polish Pass (2026-05-18)
 
+```
+# --------------------------------------------------------------------------
+# NOTES:    SESSION.md
+# --------------------------------------------------------------------------
+# ABSTRACT: Immutable SBAR record of the v0.3.1 repository polish, data-group
+#     rename, release work, tooling updates, and development-branch creation.
+# CREATED:  260518 BY: JN
+# UPDATED:  260518 BY: JN
+# VERSION:  0.3.1
+# ARCHITECT: JN
+# TECHLEAD: JN
+# --------------------------------------------------------------------------
+```
+
 ---
 
 ## SBAR

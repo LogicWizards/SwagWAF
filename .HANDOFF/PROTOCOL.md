@@ -1,73 +1,65 @@
-Read [](file:///Users/jnegron9/DATA/projects/ai-labs)
+# Protocol: SwagWAF Context Continuity
 
-Read [](file:///Users/jnegron9/DATA/projects/ai-labs/.HANDOFF)
+```
+# --------------------------------------------------------------------------
+# CONFIG:   PROTOCOL.md
+# --------------------------------------------------------------------------
+# ABSTRACT: Project-local 5-Star handoff rules for SwagWAF, version-pinned
+#     to the upstream protocol with documented local adaptations.
+# CREATED:  260518 BY: JN
+# UPDATED:  260730 BY: JN
+# VERSION:  0.3.8
+# ARCHITECT: JN
+# TECHLEAD: JN
+# --------------------------------------------------------------------------
+```
 
-Read [](file:///Users/jnegron9/DATA/projects/ai-labs/.HANDOFF/.PROTOCOL)
+## Upstream
 
-Read [](file:///Users/jnegron9/DATA/projects/ai-labs/.HANDOFF/.PROTOCOL/5-star-thumbprint.md#1-1), lines 1 to 200
+SwagWAF follows the 5-Star HANDOFF Protocol v0.5 maintained by `wwwizards/ai-labs`.
+This file is the portable project summary; a cold-starting contributor must not require
+access to the upstream private working tree.
 
-Read [](file:///Users/jnegron9/DATA/projects/ai-labs/.HANDOFF/.PROTOCOL/decision-matrix.md#1-1), lines 1 to 100
+## Project Context
 
-Read [](file:///Users/jnegron9/DATA/projects/ai-labs/MULTI-AGENT-COORDINATION-RESEARCH.md#1-1), lines 1 to 60
+Read these files at the start of substantive work:
 
-Here's the full picture:
-
----
-
-## The 5-Star Thumbprint Protocol
-
-Developed in ai-labs, codified in `.HANDOFF/.PROTOCOL/5-star-thumbprint.md`. It's a **context continuity standard** for AI-assisted development across sessions, tools, and agents.
-
-### The 5 Stars
-
-| Star | File | Coverage |
+| File | Purpose | Update cadence |
 |---|---|---|
-| ★1 | AGENTS.md at repo root | Claude Code, Gemini CLI, VS Code Copilot, Codex |
-| ★2 | `HANDOFF.instructions.md` (applyTo: \*\*) | VS Code Copilot — auto-injected every session |
-| ★3 | `.github/instructions/*.instructions.md` | Domain-specific IDE rules |
-| ★4 | `.HANDOFF/` — 4 files: FEATURE, SPEC, DESIGN, STATE | All tools — loaded at session start |
-| ★5 | `.HANDOFF/SESSIONS/` — per-session, then immutable | All tools — loaded on demand |
+| `FEATURE.md` | Immutable project intent and boundaries | Write once |
+| `SPEC.md` | Current acceptance criteria | Phase boundaries |
+| `DESIGN.md` | Append-only architectural decisions | Decision changes |
+| `ROADMAP.md` | Sequenced future delivery | Material reprioritization |
+| `STATE.md` | Current branch, version, blockers, and next actions | Every handoff |
+| `SESSIONS/*/README.md` | Immutable SBAR evidence | Once per session |
 
-### The 5-Way `.HANDOFF/` Split
+## Local Adaptations
 
-Each file has a different change cadence, which is why they're split:
+1. No repo-local `AGENTS.md` is maintained. Project truth lives in `.HANDOFF/`; workspace
+   safety and file conventions are inherited when available.
+2. `ROADMAP.md` is an additional permanent context file because policy automation spans
+   multiple releases and ownership boundaries.
+3. The existing flat `STATE.md` path is retained to avoid a migration during active QA.
+4. Session records use `SESSIONS/YYMMDD-<slug>/README.md` for GitHub preview.
 
-- **PROTOCOL.md** — (THIS FILE) - updated from ai-labs.org
-- **FEATURE.md** — written once at epic start, never edited (scope anchor)
-- **SPEC.md** — updated at sprint boundaries only (acceptance criteria)
-- **DESIGN.md** — append-only on architecture decisions (regression prevention)
-- **STATE.md** — updated every session (live task board, blockers with `done-when` conditions)
+## Rules
 
-STATE.md stays under ~50 lines of live content. Completed work moves to a SESSION.md, not piles up in STATE.
+- Do not state assumptions as facts; preserve command output or logs as evidence.
+- Validate BIG-IP CLI syntax on the target TMOS version or against official F5 references.
+- Do not invent tmsh modules for generic iRule `table` state.
+- Do not edit immutable closed session records; correct current truth in `STATE.md` and
+  append a new session record explaining the delta.
+- Architectural reversals require a new decision in `DESIGN.md`; never silently delete
+  the decision being superseded.
+- Keep secrets out of chat, Git, data-group metadata, logs, and command arguments.
 
-### Session Format — SBAR
+## SBAR
 
-Each `SESSIONS/YYMMDD-<slug>/SESSION.md` follows clinical handoff format (SBAR):
-- **S**ituation — current state, phase, blockers
-- **B**ackground — why the project exists, key constraints
-- **A**ssessment — what was found/decided/produced this session
-- **R**ecommendation — what happens next, in order
+Each session record contains Situation, Background, Assessment, and Recommendation,
+followed by artifacts, decisions, validation evidence, and lessons when applicable.
 
-### Stale Handoff Signal
+## Stale-Handoff Signal
 
-If an AI says **"Now I can see the full picture"** — stop. That phrase signals the handoff failed. Update the relevant `.HANDOFF/` docs before continuing. (This is also in your user memory.)
-
-### Handback / Swarm Pattern (research-stage)
-
-The multi-agent coordination research captured in MULTI-AGENT-COORDINATION-RESEARCH.md extends the protocol to parallel agents:
-- Each agent gets a scoped task file with acceptance criteria and dependencies
-- Agents write progress to a shared state file
-- User merges completed work (git-style)
-- Currently at "staggered sequential" MVP — true parallel swarm is still a research item
-
-### Minimum Viable Thumbprint (two files)
-
-```
-AGENTS.md
-.HANDOFF/STATE.md
-```
-This is the floor. Anything less = cold-transfer repo.
-
----
-
-SwagWAF is running the full 5-star (AGENTS.md + .HANDOFF/STATE.md + SESSIONS/ already in place). The FEATURE/SPEC/DESIGN split could be added later if the project grows.
+If an agent says "Now I can see the full picture" or an equivalent phrase, stop work,
+identify what the handoff omitted or contradicted, update the relevant `.HANDOFF/`
+documents, and produce a corrected handoff before continuing.
