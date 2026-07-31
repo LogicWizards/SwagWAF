@@ -46,7 +46,8 @@ SwagWAF/
 ├── tests/
 │   ├── README.md                <-- authorized post-deploy test runbook
 │   └── python/
-│       └── test_post_deploy.py  <-- stdlib, pytest, and PyST-discoverable checks
+│       ├── test_post_deploy.py  <-- network-gated post-deploy checks
+│       └── test_update_dg.py    <-- offline fail-closed parser checks
 └── .github/
     └── workflows/
 ```

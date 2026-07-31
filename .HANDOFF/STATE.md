@@ -27,7 +27,16 @@ The public `v0.3.8` tag points to a handoff-free snapshot. `main` contains a lat
 - Authorized synthetic tests generated `INJECTION_ATTEMPT`, `BLOCKED`, and `BLOCKED_REPEAT` while trusted-source events continued, proving that the exception bypasses rate limiting without bypassing payload inspection.
 - A built-in fallback phrase was rejected with HTTP 400. MEDIUM-tier phrases reached the backend with HTTP 404, consistent with the optional tiered jailbreak-pattern DG being absent, uninitialized, or missing those records on this VIP.
 - PyST v0.1.4 discovered and ran `tests/python/test_post_deploy.py` through the working `/Users/jnegron9/DATA/miners/ipscan/pyst.py` runtime.
+- Five offline parser tests in `tests/python/test_update_dg.py` passed, covering all 68 shipped records, escaped role keys, trusted-source metadata, and rejection of multiline and inline malformed records before destructive replacement.
 - A 260731 `tmsh list ltm rule ADMIN-SwagWAF` scrape matched the release source's behavior-critical trusted-source, `-notouch`, timeout, and logging paths. HTML-rendered `&#8212;` sequences in pasted comments were treated as transport substitutions, not source changes.
+
+## Forensic Recovery Status
+
+- No stash, unreachable commit, backup patch, rejected patch, or temporary source file contains missing work.
+- The only unreachable Git object is an obsolete README draft superseded by the current README.
+- All 22 paths changed by release-prep commit `f87ecf9` remain on `dev`; generated `.pyc`, `.pyo`, and `__pycache__` artifacts were intentionally removed.
+- `.HANDOFF/SNAPSHOTS/iRule-SwagWAF-post-QA-260731.tcl` is the deployed v0.3.8 release form, not a backup of the later hardening. The hardening was recovered from the transcript and committed in `f62dfc8`.
+- README test inventory and snapshot labeling were corrected during the forensic closeout. No substantive code or test source was found missing.
 
 ## Open Items
 

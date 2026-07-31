@@ -2,6 +2,12 @@
 # iRule Name: SwagWAF
 # File:       iRule-SwagWAF.tcl  (version tracked via git tags, not filename)
 #--------------------------------------------------------------------------
+# SNAPSHOT:   Device-validated v0.3.8 release form captured after rollback.
+# WARNING:    Despite this file's historical name, it does not contain the
+#             post-release timeout-unit or structured-log sanitation changes.
+#             Those changes were recovered from the session transcript and
+#             committed to dev in f62dfc8.
+#--------------------------------------------------------------------------
 # ABSTRACT: "Poor Man's WAF Enhanced for AI/API Endpoints"
 # PURPOSE: Protect LLM/AI inference APIs from abuse, injection attacks, and
 #          bot scraping while enforcing security best practices
