@@ -42,8 +42,9 @@ when RULE_INIT {
     # === RATE LIMITING CONFIG (Bot Detection) ===
     set static::max_requests 100      ; # Max requests per window
     set static::window_ms 2000        ; # 2-second sliding window
+    set static::window_seconds 2      ; # table idle timeout uses seconds
     set static::violation_threshold 5 ; # Violations before block
-    set static::violation_window_ms 30000 ; # 30s violation window
+    set static::violation_window_seconds 30 ; # table timeout uses seconds
     set static::block_seconds 600     ; # 10 min block duration
 
     # NEW in v0.3.8: Trusted sources bypass rate limiting only. The canonical IP data group is
@@ -127,12 +128,14 @@ when HTTP_REQUEST {
     # Capture client-claimed XFF before overwriting — src != client_xff indicates spoofing attempt
     set client_xff [HTTP::header "x-forwarded-for"]
     if {$client_xff eq ""} { set client_xff "(none)" }
+    set client_xff [string map [list "|" "," "\r" " " "\n" " " "\"" "'"] $client_xff]
     HTTP::header remove x-forwarded-for
     HTTP::header insert x-forwarded-for [IP::remote_addr]
     HTTP::header remove X-Custom-XFF
     HTTP::header insert X-Custom-XFF [IP::remote_addr]
     set xff [HTTP::header "x-forwarded-for"]
-    if {$static::debug} {log local0. "SWAGWAF|TRACE|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=[HTTP::uri]|event=REQUEST"}
+    set request_uri [string map [list "|" "," "\r" " " "\n" " " "\"" "'"] [HTTP::uri]]
+    if {$static::debug} {log local0. "SWAGWAF|TRACE|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=$request_uri|event=REQUEST"}
 
     # === TRUSTED SOURCE CHECK ===
     set trusted_source_match ""
@@ -154,12 +157,12 @@ when HTTP_REQUEST {
         # trusted sources must still pass through payload inspection below.
         table delete "block:$ip"
         table delete "viol:$ip"
-        log local0. "SWAGWAF|TRUSTED_SOURCE|src=$ip:$sport|matched=$trusted_source_match|policy=\"$trusted_source_policy\"|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=[HTTP::uri]|action=rate_limit_bypass"
+        log local0. "SWAGWAF|TRUSTED_SOURCE|src=$ip:$sport|matched=$trusted_source_match|policy=\"$trusted_source_policy\"|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=$request_uri|action=rate_limit_bypass"
     } else {
         # === CHECK IF IP IS BLOCKED ===
         # -notouch prevents blocked retries from extending the idle timeout.
         if {[table lookup -notouch "block:$ip"] eq "1"} {
-            log local0. "SWAGWAF|BLOCKED_REPEAT|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=[HTTP::uri]"
+            log local0. "SWAGWAF|BLOCKED_REPEAT|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=$request_uri"
             HTTP::respond 429 content "{\n  \"error\": \"rate_limit_exceeded\",\n  \"message\": \"Temporarily blocked for repeated abuse\",\n  \"retry_after\": 600\n}" "Content-Type" "application/json"
             return
         }
@@ -174,20 +177,20 @@ when HTTP_REQUEST {
         if {$req_count >= $static::max_requests} {
             # Record violation
             set v [table incr "viol:$ip"]
-            table timeout "viol:$ip" $static::violation_window_ms
+            table timeout "viol:$ip" $static::violation_window_seconds
             if {$v >= $static::violation_threshold} {
                 # Block IP temporarily
                 table set "block:$ip" 1 $static::block_seconds
-                log local0. "SWAGWAF|BLOCKED|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=[HTTP::uri]|violations=$v"
+                log local0. "SWAGWAF|BLOCKED|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=$request_uri|violations=$v"
                 HTTP::respond 429 content "{\n  \"error\": \"rate_limit_exceeded\",\n  \"message\": \"Blocked for repeated abuse\",\n  \"retry_after\": 600\n}" "Content-Type" "application/json"
                 return
             }
-            log local0. "SWAGWAF|RATE_LIMITED|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=[HTTP::uri]|req_count=$req_count|violations=$v"
+            log local0. "SWAGWAF|RATE_LIMITED|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=$request_uri|req_count=$req_count|violations=$v"
             HTTP::respond 429 content "{\n  \"error\": \"rate_limit_exceeded\",\n  \"message\": \"Too many requests - slow down\",\n  \"retry_after\": 2\n}" "Content-Type" "application/json"
             return
         }
         # === LOG TIMESTAMP OF THIS REQUEST ===
-        table set -subtable "ts:$ip" $now 1 $static::window_ms
+        table set -subtable "ts:$ip" $now 1 $static::window_seconds
     }
     # === AI-SPECIFIC: PROMPT INJECTION DETECTION ===
     # Only inspect POST requests with JSON payload
@@ -221,11 +224,11 @@ when HTTP_REQUEST_DATA {
         set threat_level [class match -value -- $matched_phrase equals $static::dg_name]
         if {$threat_level eq ""} { set threat_level "HIGH" }
 
-        log local0. "SWAGWAF|INJECTION_ATTEMPT|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=[HTTP::uri]|phrase=\"$matched_phrase\"|threat=$threat_level"
+        log local0. "SWAGWAF|INJECTION_ATTEMPT|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=$request_uri|phrase=\"$matched_phrase\"|threat=$threat_level"
 
         if {$threat_level eq "HIGH"} {
             set v [table incr "viol:$ip" 3]
-            table timeout "viol:$ip" $static::violation_window_ms
+            table timeout "viol:$ip" $static::violation_window_seconds
             if {$v >= $static::violation_threshold} {
                 table set "block:$ip" 1 $static::block_seconds
                 log local0. "SWAGWAF|BLOCKED|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|violations=$v|reason=injection_threshold"
@@ -236,12 +239,12 @@ when HTTP_REQUEST_DATA {
             return
         } elseif {$threat_level eq "MEDIUM"} {
             set v [table incr "viol:$ip" 1]
-            table timeout "viol:$ip" $static::violation_window_ms
+            table timeout "viol:$ip" $static::violation_window_seconds
             HTTP::respond 400 content "{\n  \"error\": \"invalid_request\",\n  \"message\": \"Request rejected by security policy\"\n}" "Content-Type" "application/json"
             return
         } else {
             # LOW: always log — ISA wants visibility on all security signals regardless of debug mode
-            log local0. "SWAGWAF|LOW_RISK|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=[HTTP::uri]|phrase=\"$matched_phrase\""
+            log local0. "SWAGWAF|LOW_RISK|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=$request_uri|phrase=\"$matched_phrase\""
             return
         }
     }
@@ -250,9 +253,9 @@ when HTTP_REQUEST_DATA {
     # Used when dg_swagwaf_jailbreak_patterns data group is not configured on this BIG-IP.
     foreach pattern $static::injection_patterns {
         if {[string match -nocase "*$pattern*" $payload_lower]} {
-            log local0. "SWAGWAF|INJECTION_ATTEMPT|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=[HTTP::uri]|phrase=\"$pattern\"|threat=HIGH|dg=static_fallback"
+            log local0. "SWAGWAF|INJECTION_ATTEMPT|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=$request_uri|phrase=\"$pattern\"|threat=HIGH|dg=static_fallback"
             set v [table incr "viol:$ip" 3]
-            table timeout "viol:$ip" $static::violation_window_ms
+            table timeout "viol:$ip" $static::violation_window_seconds
             if {$v >= $static::violation_threshold} {
                 table set "block:$ip" 1 $static::block_seconds
                 log local0. "SWAGWAF|BLOCKED|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|violations=$v|reason=injection_threshold|dg=static_fallback"
