@@ -17,7 +17,9 @@
 ## What is the current version?
 
 v0.3.8 is the latest published release. The `dev` branch contains post-release
-hardening that has not yet been promoted or tagged.
+hardening that has not yet been promoted or tagged, currently at internal version
+`0.3.8.1`: every `SWAGWAF|` event carries a quoted `policy="..."` verdict field and
+all 429 `retry_after` values derive from the configured block/window seconds.
 
 ## Which BIG-IP versions are supported?
 
@@ -41,8 +43,13 @@ group is not a general WAF allowlist.
 
 In v0.3.8, the forwarded XFF header is rewritten before reaching the backend, but the
 client-submitted XFF and request URI are logged without field escaping. The `dev`
-branch sanitizes those values before structured logging; the broader event-envelope
-normalization remains SW-28 follow-up work.
+branch sanitizes those values before structured logging, unifies every HTTP event onto
+one canonical field set, and adds a `true_client` field. `true_client` equals the
+verified L4 peer unless that peer is listed in the optional
+`/Common/dg_swagwaf_trusted_proxies` data group, in which case the left-most
+`X-Forwarded-For` entry is logged as the origin client. This derivation is for logging
+and ISA traceability only; rate-limit enforcement still keys on the verified L4 peer.
+Never trust XFF from a peer that is not vetted infrastructure you control.
 
 ## Should each iRule or application have its own trusted-source data group?
 

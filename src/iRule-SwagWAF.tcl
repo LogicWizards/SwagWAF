@@ -6,10 +6,10 @@
 # PURPOSE: Protect LLM/AI inference APIs from abuse, injection attacks, and
 #          bot scraping while enforcing security best practices
 # THEME: AI Infrastructure - Traffic management & security for AI workloads
-# VERSION: 0.3.8
 # AUTHOR: Joe Negron <https://github.com/LogicWizards>
 # REPO: https://github.com/LogicWizards/SwagWAF
 # LICENSE: MIT (see LICENSE file in repo)
+# VERSION: 0.3.8.1
 # CREATED: 260310 FOR: AppWorld 2026 iRules Contest
 # UPDATED: 260708  BY: JN — BIG-IP v17.x compat: matches_regex removed;
 #           - switched to class match contains (literal substring keys in DG);
@@ -23,6 +23,19 @@
 # UPDATED: 260730  BY: JN - v0.3.8: raised rate-limit ceiling to 100 requests per window;
 #           - added canonical trusted-source IP data-group rate-limit bypass with record metadata in ISA logs;
 #           - block lookups use -notouch so blocked requests cannot renew the block timeout
+# UPDATED: 260804  BY: JN (dev) - unified SWAGWAF event schema for ISA traceability:
+#           - every HTTP event now logs one canonical field set via $swag_ctx
+#             (src/true_client/xff/client_xff/dst/vip/method/uri) plus policy;
+#           - added optional dg_swagwaf_trusted_proxies: when the L4 peer is a vetted
+#             proxy, the left-most XFF entry is logged as true_client (LOGGING ONLY —
+#             rate-limit enforcement still keys on the verified L4 peer);
+#           - added method/uri to the two injection BLOCKED events (were missing);
+#           - TRACE remains debug-gated behind static::debug (unchanged)
+# UPDATED: 260804  BY: JN (dev) - v0.3.8.1: policy field now carries an actionable
+#           verdict on EVERY event instead of an "N/A" fall-through — TLS version,
+#           rate-limit math, threat level, malicious-payload, and hardening stage;
+#           - retry_after values in 429 payloads derive from static::block_seconds
+#             and static::window_seconds instead of hardcoded literals
 #--------------------------------------------------------------------------
 # FEATURES:
 # - Bot detection via rate limiting (sliding window, violation tracking)
@@ -58,6 +71,19 @@ when RULE_INIT {
     } else {
         set static::trusted_sources_ready 1
         log local0. "SwagWAF: $static::trusted_sources_dg loaded OK ($trusted_sources_count records)"
+    }
+
+    # NEW: Optional vetted-proxy list for XFF-based true-client derivation (logging only).
+    # When the L4 peer is a vetted reverse proxy / load balancer in this group, SwagWAF
+    # trusts the left-most X-Forwarded-For entry as the origin client for ISA traceability.
+    # Absent -> XFF is never trusted and the verified L4 peer is treated as the client.
+    set static::trusted_proxies_dg "/Common/dg_swagwaf_trusted_proxies"
+    if {[catch {class size $static::trusted_proxies_dg} trusted_proxies_count]} {
+        set static::trusted_proxies_ready 0
+        log local0. "SwagWAF: $static::trusted_proxies_dg not deployed — XFF origin derivation disabled; L4 peer is the client"
+    } else {
+        set static::trusted_proxies_ready 1
+        log local0. "SwagWAF: $static::trusted_proxies_dg loaded OK ($trusted_proxies_count proxies)"
     }
    
     # === AI-SPECIFIC PROTECTION ===
@@ -107,9 +133,9 @@ when RULE_INIT {
 # CLIENTSSL_HANDSHAKE - TLS Version Enforcement
 #--------------------------------------------------------------------------
 when CLIENTSSL_HANDSHAKE {
-    if {$static::debug} {log local0. "SWAGWAF|TRACE|src=[IP::client_addr]:[TCP::client_port]|dst=[IP::local_addr]:[TCP::local_port]|vip=[virtual name]|event=TLS_CHECK|tls_ver=[SSL::cipher version]"}
+    if {$static::debug} {log local0. "SWAGWAF|TRACE|src=[IP::client_addr]:[TCP::client_port]|dst=[IP::local_addr]:[TCP::local_port]|vip=[virtual name]|event=TLS_CHECK|tls_ver=[SSL::cipher version]|policy=\"TLS [SSL::cipher version]\""}
     if {[SSL::cipher version] ne "TLSv1.2" && [SSL::cipher version] ne "TLSv1.3"} {
-        log local0. "SWAGWAF|TLS_REJECTED|src=[IP::client_addr]:[TCP::client_port]|dst=[IP::local_addr]:[TCP::local_port]|vip=[virtual name]|tls_ver=[SSL::cipher version]"
+        log local0. "SWAGWAF|TLS_REJECTED|src=[IP::client_addr]:[TCP::client_port]|dst=[IP::local_addr]:[TCP::local_port]|vip=[virtual name]|tls_ver=[SSL::cipher version]|policy=\"TLS rejected: [SSL::cipher version] below TLSv1.2\""
         reject
     }
 }
@@ -135,7 +161,26 @@ when HTTP_REQUEST {
     HTTP::header insert X-Custom-XFF [IP::remote_addr]
     set xff [HTTP::header "x-forwarded-for"]
     set request_uri [string map [list "|" "," "\r" " " "\n" " " "\"" "'"] [HTTP::uri]]
-    if {$static::debug} {log local0. "SWAGWAF|TRACE|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=$request_uri|event=REQUEST"}
+    # === TRUE CLIENT DERIVATION (ISA traceability) ===
+    # src (in $swag_ctx below) is always the verified L4 TCP peer. client_xff is the full
+    # raw inbound X-Forwarded-For chain that peer presented. Only when the peer is a vetted
+    # proxy in dg_swagwaf_trusted_proxies does SwagWAF trust the left-most XFF entry as the
+    # origin client; otherwise XFF is unverified and true_client stays equal to the L4 peer.
+    # NOTE: this affects LOGGING only — rate-limit enforcement still keys on the L4 peer.
+    set true_client $ip
+    if {$static::trusted_proxies_ready && $client_xff ne "(none)" && [class match $ip equals $static::trusted_proxies_dg]} {
+        set true_client [string trim [lindex [split $client_xff ","] 0]]
+    }
+    # Canonical event context. Every SWAGWAF HTTP event logs this identical field set so
+    # records share one shape and one set of query-able field names regardless of which
+    # event fired. Event-specific fields and policy are appended per log line.
+    set swag_ctx "src=$ip:$sport|true_client=$true_client|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=$request_uri"
+    # Per-request policy label. Every SWAGWAF event carries a policy field holding an
+    # actionable verdict. Baseline is "inspect" (request seen, no verdict yet); a
+    # trusted-source match below replaces it with governance metadata, and each
+    # enforcement branch overrides it with its own contextual verdict.
+    set event_policy "inspect"
+    if {$static::debug} {log local0. "SWAGWAF|TRACE|$swag_ctx|event=REQUEST|policy=\"$event_policy\""}
 
     # === TRUSTED SOURCE CHECK ===
     set trusted_source_match ""
@@ -148,6 +193,7 @@ when HTTP_REQUEST {
                 set trusted_source_policy "unspecified"
             }
             set trusted_source_policy [string map [list "|" "," "\r" " " "\n" " " "\"" "'"] $trusted_source_policy]
+            set event_policy $trusted_source_policy
         }
     }
 
@@ -157,13 +203,13 @@ when HTTP_REQUEST {
         # trusted sources must still pass through payload inspection below.
         table delete "block:$ip"
         table delete "viol:$ip"
-        log local0. "SWAGWAF|TRUSTED_SOURCE|src=$ip:$sport|matched=$trusted_source_match|policy=\"$trusted_source_policy\"|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=$request_uri|action=rate_limit_bypass"
+        log local0. "SWAGWAF|TRUSTED_SOURCE|$swag_ctx|matched=$trusted_source_match|action=rate_limit_bypass|policy=\"$trusted_source_policy\""
     } else {
         # === CHECK IF IP IS BLOCKED ===
         # -notouch prevents blocked retries from extending the idle timeout.
         if {[table lookup -notouch "block:$ip"] eq "1"} {
-            log local0. "SWAGWAF|BLOCKED_REPEAT|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=$request_uri"
-            HTTP::respond 429 content "{\n  \"error\": \"rate_limit_exceeded\",\n  \"message\": \"Temporarily blocked for repeated abuse\",\n  \"retry_after\": 600\n}" "Content-Type" "application/json"
+            log local0. "SWAGWAF|BLOCKED_REPEAT|$swag_ctx|policy=\"Active block; retry after $static::block_seconds secs\""
+            HTTP::respond 429 content "{\n  \"error\": \"rate_limit_exceeded\",\n  \"message\": \"Temporarily blocked for repeated abuse\",\n  \"retry_after\": $static::block_seconds\n}" "Content-Type" "application/json"
             return
         }
         # === CLEANUP OLD REQUEST TIMESTAMPS ===
@@ -181,12 +227,12 @@ when HTTP_REQUEST {
             if {$v >= $static::violation_threshold} {
                 # Block IP temporarily
                 table set "block:$ip" 1 $static::block_seconds
-                log local0. "SWAGWAF|BLOCKED|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=$request_uri|violations=$v"
-                HTTP::respond 429 content "{\n  \"error\": \"rate_limit_exceeded\",\n  \"message\": \"Blocked for repeated abuse\",\n  \"retry_after\": 600\n}" "Content-Type" "application/json"
+                log local0. "SWAGWAF|BLOCKED|$swag_ctx|violations=$v|reason=rate_limit|policy=\"Exceeded $req_count >= $static::max_requests; blocked $static::block_seconds secs after $v viol\""
+                HTTP::respond 429 content "{\n  \"error\": \"rate_limit_exceeded\",\n  \"message\": \"Blocked for repeated abuse\",\n  \"retry_after\": $static::block_seconds\n}" "Content-Type" "application/json"
                 return
             }
-            log local0. "SWAGWAF|RATE_LIMITED|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=$request_uri|req_count=$req_count|violations=$v"
-            HTTP::respond 429 content "{\n  \"error\": \"rate_limit_exceeded\",\n  \"message\": \"Too many requests - slow down\",\n  \"retry_after\": 2\n}" "Content-Type" "application/json"
+            log local0. "SWAGWAF|RATE_LIMITED|$swag_ctx|req_count=$req_count|violations=$v|policy=\"Exceeded $req_count >= $static::max_requests in $static::window_seconds secs\""
+            HTTP::respond 429 content "{\n  \"error\": \"rate_limit_exceeded\",\n  \"message\": \"Too many requests - slow down\",\n  \"retry_after\": $static::window_seconds\n}" "Content-Type" "application/json"
             return
         }
         # === LOG TIMESTAMP OF THIS REQUEST ===
@@ -224,14 +270,14 @@ when HTTP_REQUEST_DATA {
         set threat_level [class match -value -- $matched_phrase equals $static::dg_name]
         if {$threat_level eq ""} { set threat_level "HIGH" }
 
-        log local0. "SWAGWAF|INJECTION_ATTEMPT|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=$request_uri|phrase=\"$matched_phrase\"|threat=$threat_level"
+        log local0. "SWAGWAF|INJECTION_ATTEMPT|$swag_ctx|phrase=\"$matched_phrase\"|threat=$threat_level|policy=\"Threat Level: $threat_level\""
 
         if {$threat_level eq "HIGH"} {
             set v [table incr "viol:$ip" 3]
             table timeout "viol:$ip" $static::violation_window_seconds
             if {$v >= $static::violation_threshold} {
                 table set "block:$ip" 1 $static::block_seconds
-                log local0. "SWAGWAF|BLOCKED|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|violations=$v|reason=injection_threshold"
+                log local0. "SWAGWAF|BLOCKED|$swag_ctx|violations=$v|reason=injection_threshold|policy=\"Malicious Payload; Threat Level: $threat_level; blocked $static::block_seconds secs\""
                 HTTP::respond 403 content "{\n  \"error\": \"forbidden\",\n  \"message\": \"Malicious payload detected\"\n}" "Content-Type" "application/json"
                 return
             }
@@ -244,7 +290,7 @@ when HTTP_REQUEST_DATA {
             return
         } else {
             # LOW: always log — ISA wants visibility on all security signals regardless of debug mode
-            log local0. "SWAGWAF|LOW_RISK|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=$request_uri|phrase=\"$matched_phrase\""
+            log local0. "SWAGWAF|LOW_RISK|$swag_ctx|phrase=\"$matched_phrase\"|policy=\"Threat Level: LOW\""
             return
         }
     }
@@ -253,12 +299,12 @@ when HTTP_REQUEST_DATA {
     # Used when dg_swagwaf_jailbreak_patterns data group is not configured on this BIG-IP.
     foreach pattern $static::injection_patterns {
         if {[string match -nocase "*$pattern*" $payload_lower]} {
-            log local0. "SWAGWAF|INJECTION_ATTEMPT|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|method=[HTTP::method]|uri=$request_uri|phrase=\"$pattern\"|threat=HIGH|dg=static_fallback"
+            log local0. "SWAGWAF|INJECTION_ATTEMPT|$swag_ctx|phrase=\"$pattern\"|threat=HIGH|dg=static_fallback|policy=\"Threat Level: HIGH\""
             set v [table incr "viol:$ip" 3]
             table timeout "viol:$ip" $static::violation_window_seconds
             if {$v >= $static::violation_threshold} {
                 table set "block:$ip" 1 $static::block_seconds
-                log local0. "SWAGWAF|BLOCKED|src=$ip:$sport|xff=$xff|client_xff=$client_xff|dst=$dst:$dport|vip=[virtual name]|violations=$v|reason=injection_threshold|dg=static_fallback"
+                log local0. "SWAGWAF|BLOCKED|$swag_ctx|violations=$v|reason=injection_threshold|dg=static_fallback|policy=\"Malicious Payload; Threat Level: HIGH; blocked $static::block_seconds secs\""
                 HTTP::respond 403 content "{\n  \"error\": \"forbidden\",\n  \"message\": \"Malicious payload detected\"\n}" "Content-Type" "application/json"
                 return
             }
@@ -272,7 +318,7 @@ when HTTP_REQUEST_DATA {
 # HTTP_RESPONSE - Security Header Hardening
 #--------------------------------------------------------------------------
 when HTTP_RESPONSE {
-    if {$static::debug} {log local0. "SWAGWAF|TRACE|src=[IP::client_addr]:$sport|dst=[IP::local_addr]:$dport|vip=[virtual name]|event=RESPONSE_HEADERS"}
+    if {$static::debug} {log local0. "SWAGWAF|TRACE|src=[IP::client_addr]:$sport|dst=[IP::local_addr]:$dport|vip=[virtual name]|event=RESPONSE_HEADERS|policy=\"response hardening\""}
  
     # Remove server fingerprinting headers
     HTTP::header remove "Server"
@@ -290,7 +336,7 @@ when HTTP_RESPONSE {
     HTTP::header insert "X-Content-Type-Options" "nosniff"
    
     # === COOKIE HARDENING (Secure + HttpOnly) ===
-    if {$static::debug} {log local0. "SWAGWAF|TRACE|src=[IP::client_addr]:$sport|dst=[IP::local_addr]:$dport|vip=[virtual name]|event=COOKIE_HARDENING"}
+    if {$static::debug} {log local0. "SWAGWAF|TRACE|src=[IP::client_addr]:$sport|dst=[IP::local_addr]:$dport|vip=[virtual name]|event=COOKIE_HARDENING|policy=\"cookie hardening\""}
    
     # Use F5 native cookie security (faster than manual parsing)
     foreach cookieName [HTTP::cookie names] {

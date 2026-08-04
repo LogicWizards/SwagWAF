@@ -6,8 +6,8 @@
 # --------------------------------------------------------------------------
 # ABSTRACT: Run authorized, SIEM-marked SwagWAF checks after a QA deployment.
 # CREATED:  260731 BY: Sol(GPT5.6)::Copilot:MAC-00
-# UPDATED:  260731 BY: Sol(GPT5.6)::Copilot:MAC-00
-# VERSION:  0.3.8
+# UPDATED:  260804 BY: Sol(GPT5.6)::Copilot:MAC-00
+# VERSION:  0.3.8.1
 # ARCHITECT: JN
 # TECHLEAD: JN
 # --------------------------------------------------------------------------

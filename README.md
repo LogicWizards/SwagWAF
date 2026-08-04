@@ -7,8 +7,8 @@
 # ABSTRACT: Project overview, deployment guidance, capabilities, testing,
 #     limitations, roadmap, and release history for SwagWAF.
 # CREATED:  260310 BY: JN
-# UPDATED:  260731 BY: Sol(GPT5.6)::Copilot:MAC-00
-# VERSION:  0.3.8
+# UPDATED:  260804 BY: Sol(GPT5.6)::Copilot:MAC-00
+# VERSION:  0.3.8.1
 # ARCHITECT: JN
 # TECHLEAD: JN
 # --------------------------------------------------------------------------
@@ -42,9 +42,11 @@ SwagWAF/
 │       ├── README.md
 │       ├── dg_swagwaf_jailbreak_patterns.conf
 │       ├── dg_swagwaf_trusted_sources.conf
+│       ├── dg_swagwaf_trusted_proxies.conf
 │       └── update-dg.py
 ├── tests/
 │   ├── README.md                <-- authorized post-deploy test runbook
+│   ├── swagwaf-barrage.sh       <-- full enforcement-path barrage (curl)
 │   └── python/
 │       ├── test_post_deploy.py  <-- network-gated post-deploy checks
 │       └── test_update_dg.py    <-- offline fail-closed parser checks
@@ -358,9 +360,12 @@ sanitation changes that still require BIG-IP save/compile and behavioral validat
 
 ### Unreleased — dev
 
+- Every `SWAGWAF|` event now carries a quoted `policy="..."` field with an actionable verdict (TLS version, rate-limit math, threat level, malicious-payload, or hardening stage) instead of the previous `N/A` fall-through, so a single SIEM parse extracts a verdict for every event type.
+- Derived the `retry_after` value in every 429 payload from `static::block_seconds` and `static::window_seconds` instead of hardcoded literals.
 - Separated millisecond request-window arithmetic from second-based BIG-IP table idle timeouts.
 - Sanitized client-supplied XFF and URI values before writing structured SIEM fields.
-- Retained SW-28 follow-up work to normalize `policy`, `reason`, and `threat` across every event.
+- Unified every `SWAGWAF|` HTTP event onto one canonical field set (`src`, `true_client`, `xff`, `client_xff`, `dst`, `vip`, `method`, `uri`, `policy`) so records share one shape and query-able field names regardless of which event fired; added the previously missing `method`/`uri` on injection `BLOCKED` events.
+- Added optional `/Common/dg_swagwaf_trusted_proxies`: when the verified L4 peer is a vetted proxy, the left-most `X-Forwarded-For` entry is logged as `true_client` for ISA traceability. This is logging only — rate-limit enforcement still keys on the verified L4 peer. Absent data group means XFF is never trusted and `true_client` equals the L4 peer.
 
 ### v0.3.8 — 260730
 
