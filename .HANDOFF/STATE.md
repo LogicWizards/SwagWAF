@@ -58,6 +58,7 @@ The public `v0.3.8` tag points to a handoff-free snapshot. `main` contains a lat
 | SW-28 | Normalize the structured event envelope | Complete (dev) | Agent/ISA | Implemented on `dev`: every HTTP event logs one canonical `$swag_ctx` field set (`src`/`true_client`/`xff`/`client_xff`/`dst`/`vip`/`method`/`uri`) plus `policy`; injection `BLOCKED` events gained the missing `method`/`uri`. TLS handshake and response events keep their own field set because they fire outside the HTTP request context. Save/compile on BIG-IP 17.5 before promotion. |
 | SW-29 | Repeat controlled block-expiry validation | Medium | Joe | Sumo identified the synthetic source as `10.224.244.7`; access later returned, but a VPN source change was not ruled out. Record source before block, during retry, and after expiry. |
 | SW-30 | Decide whether XFF-derived `true_client` drives enforcement | High | Joe/ISA | `dev` derives `true_client` from the left-most XFF only when the L4 peer is in optional `/Common/dg_swagwaf_trusted_proxies`, and uses it for LOGGING only. Open policy question: if real user traffic arrives through a proxy that is also a trusted source, those users currently bypass rate limiting entirely. Decide whether rate-limit keys and trusted-source matching should switch from the L4 peer to `true_client`. Do not change enforcement without ISA sign-off and device validation. |
+| SW-31 | Validate left-to-right XFF `true_client` capture behind a real proxy | High | Joe | Not started. Stand up a Podman + NGINX reverse proxy in front of the SwagWAF VIP with `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`. Add the proxy egress IP to `/Common/dg_swagwaf_trusted_proxies` and re-init the rule. Positive test: send a spoofed left-most XFF (e.g. `1.2.3.4, <proxy>`) and confirm SIEM shows `true_client=1.2.3.4` with `src=<proxy>`. Negative test: remove the proxy from the DG and confirm `true_client` falls back to the verified L4 peer (XFF ignored). This proves the v0.3.8.1 proxy-scenario path that the 260804 direct-client barrage did not exercise. |
 
 ## Provisional Expiry Evidence
 
@@ -69,4 +70,4 @@ Plain `v0.3.8` is published. Keep `.HANDOFF` on `dev`; do not add it back to `ma
 
 ## Next Action
 
-Validate the restored timeout-unit and structured-log sanitation changes on BIG-IP 17.5, then continue SW-28 event-envelope normalization and SW-29 controlled expiry testing on `dev`.
+Save/compile v0.3.8.1 on BIG-IP 17.5 (SW-23), then run the SW-31 Podman + NGINX proxy harness to validate left-to-right XFF `true_client` capture, and complete SW-29 controlled expiry testing on `dev`. Do not change enforcement keying (SW-30) without ISA sign-off.
