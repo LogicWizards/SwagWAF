@@ -12,3 +12,7 @@
 
 # logs
 *.log
+
+# python bytecode
+__pycache__/
+*.py[cod]

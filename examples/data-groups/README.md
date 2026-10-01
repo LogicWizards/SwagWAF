@@ -1,5 +1,19 @@
 # SwagWAF — Data Groups
 
+```
+# --------------------------------------------------------------------------
+# NOTES:    README.md
+# --------------------------------------------------------------------------
+# ABSTRACT: Deployment, governance, and automation guidance for optional
+#     SwagWAF jailbreak-pattern and trusted-source BIG-IP data groups.
+# CREATED:  260518 BY: JN
+# UPDATED:  260730 BY: JN
+# VERSION:  0.3.8
+# ARCHITECT: JN
+# TECHLEAD: JN
+# --------------------------------------------------------------------------
+```
+
 This directory contains reference material and examples for the BIG-IP data groups
 that extend SwagWAF's intelligence without requiring iRule edits.
 
@@ -32,7 +46,7 @@ tmsh modify ltm rule SwagWAF { }
 
 Confirm in `/var/log/ltm`:
 ```
-SwagWAF: dg_swagwaf_jailbreak_patterns loaded OK (65 patterns)
+SwagWAF: dg_swagwaf_jailbreak_patterns loaded OK (68 patterns)
 ```
 
 > The iRule uses `catch {class size $static::dg_name}` at RULE_INIT to detect the DG automatically. No manual flag change required.
@@ -88,10 +102,10 @@ This is the same governance model that enterprise WAF platforms charge for.
 | Data Group Name | Type | Status | Purpose |
 |---|---|---|---|
 | `dg_swagwaf_jailbreak_patterns` | string | **Shipped** | LLM jailbreak / prompt injection phrases with threat levels |
+| `dg_swagwaf_trusted_sources` | IP | **POC** | Canonical rate-limit bypass policy with audit metadata |
 | `dg_swagwaf_sql_patterns` | string | Planned | SQL injection signatures |
 | `dg_swagwaf_xss_patterns` | string | Planned | Cross-site scripting payloads |
 | `dg_swagwaf_bad_ips` | address | Planned | Known malicious IP addresses |
-| `dg_swagwaf_trusted_clients` | address | Planned | High-volume trusted clients (rate-limit bypass) |
 | `dg_swagwaf_endpoint_limits` | string | Planned | Per-endpoint rate limit overrides |
 
 ---
@@ -139,6 +153,46 @@ The canonical file is [`dg_swagwaf_jailbreak_patterns.conf`](dg_swagwaf_jailbrea
 
 ---
 
+## dg_swagwaf_trusted_sources — Rate-Limit Exceptions
+
+The full SwagWAF rule consumes one canonical internal `type ip` data group. Do not
+maintain inline IP lists or per-rule exception groups. A record may be a host or CIDR;
+its value is policy metadata included in the ISA event.
+
+```text
+ltm data-group internal /Common/dg_swagwaf_trusted_sources {
+    records {
+        "192.0.2.0/24" {
+            data "owner=EXAMPLE;service=SYNTHETIC;ticket=CHG0123456;expires=2026-12-31"
+        }
+    }
+    type ip
+}
+```
+
+Required metadata fields for governed use are `owner`, `service`, `ticket`, and
+`expires`. Do not put secrets, pipes, quotes, or newlines in record values.
+
+Deploy the POC artifact and verify readback:
+
+```bash
+tmsh load sys config merge file /path/to/dg_swagwaf_trusted_sources.conf
+tmsh list ltm data-group internal /Common/dg_swagwaf_trusted_sources
+tmsh save sys config
+```
+
+After the full rule runs `RULE_INIT`, confirm initialization and use:
+
+```bash
+grep 'dg_swagwaf_trusted_sources loaded OK' /var/log/ltm | tail
+grep 'SWAGWAF|TRUSTED_SOURCE' /var/log/ltm | tail
+```
+
+The bypass applies only to rate limiting. TLS enforcement, XFF sanitation, payload
+inspection, response hardening, and structured ISA logging remain active.
+
+---
+
 ## iRule Integration Pattern
 
 ```tcl
@@ -161,7 +215,7 @@ if {$matched_phrase ne ""} {
         return
     } else {
         # LOW: always log (security signal regardless of debug mode)
-        log local0. "SWAGWAF|LOW_RISK|src=$ip|xff=$xff|vip=[virtual name]|method=[HTTP::method]|uri=[HTTP::uri]|phrase=\"$matched_phrase\""
+        log local0. "SWAGWAF|LOW_RISK|src=$ip|xff=$xff|vip=[virtual name]|method=[HTTP::method]|uri=$request_uri|phrase=\"$matched_phrase\""
     }
 }
 ```
@@ -195,15 +249,23 @@ if {$limit_str ne ""} {
 
 ## Automation — update-dg.py
 
-[`update-dg.py`](update-dg.py) pushes `dg_swagwaf_jailbreak_patterns.conf` to a BIG-IP via iControl REST-API.
+[`update-dg.py`](update-dg.py) pushes a `dg_swagwaf_*.conf` artifact to BIG-IP via iControl REST.
 - It uses Python 3.6+ stdlib only — no pip installs required. 
 - NOTE: BIG-IP v15+ ships Python 3.6.
+- It derives `type string` or `type ip` from the conf artifact.
+- It preserves quoted record metadata values containing spaces and punctuation.
 
 ```bash
 python3 update-dg.py <bigip-host> <username>              # default conf
 python3 update-dg.py <bigip-host> <username> <conf-file>  # explicit conf
 # Password is prompted interactively
 # — never passed as an argument
+```
+
+Trusted-source POC example:
+
+```bash
+python3 update-dg.py <bigip-host> <username> dg_swagwaf_trusted_sources.conf
 ```
 
 ```mermaid
